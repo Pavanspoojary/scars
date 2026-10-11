@@ -176,7 +176,20 @@ git-scars sync --targets AGENTS.md,CLAUDE.md
 ```
 *Manages a deterministic markdown table between `<!-- GIT-SCARS:START -->` and `<!-- GIT-SCARS:END -->` markers, preserving all external prompt rules.*
 
-### 8. Read-Only Freshness Check in CI
+### 8. Instant Failure & Test Triage
+Diagnose raw compiler errors, panic stack traces, or test failures directly against recorded regression wisdom:
+```bash
+# Pipe failing test output directly to triage
+go test ./... 2>&1 | git-scars triage
+
+# Or diagnose a specific error signature
+git-scars triage --error "fatal error: all goroutines are asleep - deadlock"
+
+# Machine-readable JSON for agent automated healing loops
+git-scars triage --error "panic: nil pointer" --json
+```
+
+### 9. Read-Only Freshness Check in CI
 Add to your CI workflow to ensure no active Scars have stale anchors:
 ```bash
 git-scars check
@@ -187,7 +200,7 @@ git-scars check
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
-### 9. Git Pre-Commit Hook Guardrail
+### 10. Git Pre-Commit Hook Guardrail
 Install the Git pre-commit hook to catch stale active scars before staging and committing:
 ```bash
 # Install hook into .git/hooks/pre-commit
@@ -200,7 +213,7 @@ git-scars hook status
 git-scars hook uninstall
 ```
 
-### 10. Inspect Drift & Reaffirm
+### 11. Inspect Drift & Reaffirm
 When `git-scars check` or pre-commit hooks report modified anchors, inspect the exact unified diff before reaffirming:
 ```bash
 # View unified line diff against recorded anchor baseline
@@ -212,7 +225,7 @@ git-scars reaffirm map-write-crash-391945 \
   --rationale "Verified logic holds after refactoring exporter package"
 ```
 
-### 11. Repository Health & Metrics
+### 12. Repository Health & Metrics
 Inspect overall repository scar metrics, monitored anchors, and recorded feedback:
 ```bash
 # Human-readable summary
@@ -222,7 +235,7 @@ git-scars stats
 git-scars stats --json
 ```
 
-### 12. Run Full Diagnostics
+### 13. Run Full Diagnostics
 Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
@@ -389,6 +402,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
 | `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails for AI agents |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
+| `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
 | `lint` | none | Security and schema audit (checks traversal, injections, duplicate titles) |
 | `doctor` | `[--json]` | Run repository diagnostics across Git, store, schemas, invariants, drift, hooks, and index |

@@ -109,6 +109,19 @@ Stable Exit Codes:
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
+### 7. Git Pre-Commit Hook Guardrail
+Install the Git pre-commit hook to catch stale active scars before staging and committing:
+```bash
+# Install hook into .git/hooks/pre-commit
+git-scars hook install
+
+# Inspect hook status
+git-scars hook status
+
+# Uninstall hook
+git-scars hook uninstall
+```
+
 ---
 
 ## File Format & Repository Storage
@@ -188,6 +201,42 @@ Returns versioned `reposcars.recall.v1` JSON:
   ]
 }
 ```
+
+### Model Context Protocol (MCP) Server
+
+GitScars provides a built-in stdio Model Context Protocol (MCP) server for native integration with coding assistants:
+
+```bash
+git-scars mcp
+```
+
+The MCP server exposes three read-only tools:
+- `list_scars`: List all repository scars with their lifecycle and dynamic freshness status.
+- `get_scar`: Retrieve full frontmatter, anchors, verifier results, and markdown body by scar ID.
+- `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, and commands.
+
+#### Client Configuration (Claude Desktop, Cursor, Antigravity, Windsurf)
+
+Add to your assistant's MCP configuration (e.g. `claude_desktop_config.json` or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "git-scars": {
+      "command": "git-scars",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Dependency Lockfile Anchors
+
+GitScars automatically inspects repository dependency lockfiles to anchor lessons to exact dependency versions without manual specification:
+- **Go**: Parses direct dependencies and versions from `go.mod`.
+- **Node.js**: Parses packages and versions from `package-lock.json`.
+
+When dependencies are bumped or downgraded, Scars anchored to vulnerable or breaking versions automatically trigger match signals during recall.
 
 ---
 

@@ -16,6 +16,9 @@ type HarvestOptions struct {
 	MaxCommits    int      `json:"max_commits,omitempty"`
 	DryRun        bool     `json:"dry_run,omitempty"`
 	MatchPatterns []string `json:"match_patterns,omitempty"`
+	AllowUntested bool     `json:"allow_untested,omitempty"`
+	MaxFiles      int      `json:"max_files,omitempty"`
+	MinConfidence int      `json:"min_confidence,omitempty"`
 }
 
 // HarvestCandidate represents a discovered bug fix commit suitable for scar drafting.
@@ -29,6 +32,8 @@ type HarvestCandidate struct {
 	SuggestedID string   `json:"suggested_id"`
 	Title       string   `json:"title"`
 	Lesson      string   `json:"lesson"`
+	Confidence  int      `json:"confidence"`
+	Reason      string   `json:"reason,omitempty"`
 	DraftPath   string   `json:"draft_path,omitempty"`
 }
 
@@ -46,6 +51,8 @@ var defaultFixRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)^revert[:\s]+(.+)`),
 }
 
+var issueRefRegex = regexp.MustCompile(`(?i)(#\d+|[A-Z]+-\d+|CVE-\d+-\d+)`)
+
 // HarvestCommits scans Git history for bug-fixing commits and generates candidate scar drafts.
 func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 	if !GitAvailable(s.RepoRoot) {
@@ -57,6 +64,16 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 		maxCommits = 50
 	}
 
+	maxFiles := opts.MaxFiles
+	if maxFiles <= 0 {
+		maxFiles = 5
+	}
+
+	minConfidence := opts.MinConfidence
+	if minConfidence <= 0 {
+		minConfidence = 7
+	}
+
 	gitArgs := []string{"log", fmt.Sprintf("-n%d", maxCommits), "--format=%H%x09%an%x09%s"}
 	if opts.SinceRef != "" {
 		gitArgs = append(gitArgs, opts.SinceRef+"..HEAD")
@@ -66,7 +83,6 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 	cmd.Dir = s.RepoRoot
 	out, err := cmd.Output()
 	if err != nil {
-		// If revision range failed, fallback to simple log
 		cmd = exec.Command("git", "log", fmt.Sprintf("-n%d", maxCommits), "--format=%H%x09%an%x09%s")
 		cmd.Dir = s.RepoRoot
 		out, err = cmd.Output()
@@ -75,7 +91,6 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 		}
 	}
 
-	// Load existing scar provenances to prevent re-drafting
 	existingScars, _ := s.ListScars()
 	knownCommits := make(map[string]bool)
 	for _, sum := range existingScars {
@@ -112,9 +127,13 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 			continue
 		}
 
-		// Inspect modified files in commit
 		diffFiles, err := getCommitFiles(s.RepoRoot, sha)
 		if err != nil || len(diffFiles) == 0 {
+			continue
+		}
+
+		// Noise filter 1: diffuse commits touching > maxFiles files are large refactors, not atomic bug fixes
+		if len(diffFiles) > maxFiles {
 			continue
 		}
 
@@ -132,28 +151,53 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 			continue
 		}
 
+		// Noise filter 2: require co-located test unless explicitly allowed
+		if !opts.AllowUntested && len(testFiles) == 0 {
+			continue
+		}
+
+		// Confidence calculation (1-10)
+		confidence := 2
+		var reasons []string
+
+		if issueRefRegex.MatchString(subject) {
+			confidence += 3
+			reasons = append(reasons, "issue_ref(+3)")
+		}
+		if len(testFiles) > 0 {
+			confidence += 3
+			reasons = append(reasons, "test_colocated(+3)")
+		}
+		if len(diffFiles) <= 3 {
+			confidence += 2
+			reasons = append(reasons, "focused_diff(+2)")
+		}
+		if confidence > 10 {
+			confidence = 10
+		}
+
+		// Noise filter 3: drop low-confidence candidates
+		if confidence < minConfidence {
+			continue
+		}
+
 		cleanTitle := cleanSubjectTitle(subject)
 		lesson := fmt.Sprintf("Prevention lesson derived from fix commit %s by %s: ensure regression checks cover %s.", sha[:min(7, len(sha))], author, strings.Join(prodFiles, ", "))
 
 		candidate := HarvestCandidate{
-			CommitSHA: sha,
-			Subject:   subject,
-			Author:    author,
-			Files:     prodFiles,
-			TestFiles: testFiles,
-			Title:     cleanTitle,
-			Lesson:    lesson,
+			CommitSHA:  sha,
+			Subject:    subject,
+			Author:     author,
+			Files:      prodFiles,
+			TestFiles:  testFiles,
+			Title:      cleanTitle,
+			Lesson:     lesson,
+			Confidence: confidence,
+			Reason:     strings.Join(reasons, ","),
 		}
 
-		// Infer verifier command if Go test file present
-		if len(testFiles) > 0 {
-			for _, tf := range testFiles {
-				if strings.HasSuffix(tf, "_test.go") {
-					candidate.Verifier = []string{"go", "test", "-race", "./" + filepath.Dir(tf) + "/..."}
-					break
-				}
-			}
-		}
+		// Infer multi-language verifier command
+		candidate.Verifier = inferVerifierCommand(testFiles)
 
 		if !opts.DryRun {
 			draft, path, err := s.CreateDraft(candidate.Title, candidate.Lesson, candidate.Files)
@@ -182,6 +226,33 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 	}
 
 	return result, nil
+}
+
+func inferVerifierCommand(testFiles []string) []string {
+	if len(testFiles) == 0 {
+		return nil
+	}
+
+	for _, tf := range testFiles {
+		// Go
+		if strings.HasSuffix(tf, "_test.go") {
+			return []string{"go", "test", "-race", "./" + filepath.Dir(tf) + "/..."}
+		}
+		// TypeScript / JavaScript
+		if strings.HasSuffix(tf, ".test.ts") || strings.HasSuffix(tf, ".spec.ts") ||
+			strings.HasSuffix(tf, ".test.js") || strings.HasSuffix(tf, ".spec.js") {
+			return []string{"npm", "test", "--", tf}
+		}
+		// Python
+		if strings.HasPrefix(filepath.Base(tf), "test_") || strings.HasSuffix(tf, "_test.py") {
+			return []string{"pytest", tf}
+		}
+		// Rust
+		if strings.HasSuffix(tf, ".rs") {
+			return []string{"cargo", "test"}
+		}
+	}
+	return nil
 }
 
 func isFixCommit(subject string, customPatterns []string) bool {
@@ -231,14 +302,12 @@ func cleanSubjectTitle(subject string) string {
 	s := strings.TrimSpace(subject)
 	for _, re := range defaultFixRegexes {
 		if m := re.FindStringSubmatch(s); len(m) > 0 {
-			// Extract trailing captured group
 			s = m[len(m)-1]
 			break
 		}
 	}
 	s = strings.TrimSpace(s)
 	if len(s) > 0 {
-		// Capitalize first letter
 		return strings.ToUpper(s[:1]) + s[1:]
 	}
 	return subject

@@ -71,3 +71,18 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Lockfile version changes automatically match relevant scars during recall.
   - Index cache resides in gitignored `.local/`, preserving clean repository state while providing instant lookup summaries.
 
+---
+
+## ADR-0006: Multi-Ecosystem Lockfiles and Anchor Baseline Diff Inspector
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Developers need to inspect the precise unified line diff of modified anchor files before executing reaffirmations on changed scars. Additionally, Rust (`Cargo.lock`) and Python (`poetry.lock`, `requirements.txt`) projects require dependency anchoring without external tooling.
+- **Decision**:
+  - Implement zero-dependency TOML and requirements line scanners for Rust `Cargo.lock` and Python `poetry.lock` / `requirements.txt`.
+  - Implement `git-scars diff <id>` to inspect differences between current working tree files and recorded baseline hashes/commits.
+- **Consequences**:
+  - Rust and Python projects seamlessly match version-dependent failure memories during recall.
+  - Reviewers can inspect exact line-by-line drift prior to reaffirmation or re-verification.
+
+

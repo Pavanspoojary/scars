@@ -12,15 +12,16 @@ import (
 
 // QueryOptions represents all inputs for a recall request.
 type QueryOptions struct {
-	Task           string   `json:"task,omitempty"`
-	Files          []string `json:"files,omitempty"`
-	Symbols        []string `json:"symbols,omitempty"`
-	Commands       []string `json:"commands,omitempty"`
-	ErrorSignature string   `json:"error_signature,omitempty"`
-	DiffRef        string   `json:"diff_ref,omitempty"`
-	IncludeStale   bool     `json:"include_stale,omitempty"`
-	Threshold      int      `json:"threshold,omitempty"`
-	TopK           int      `json:"top_k,omitempty"`
+	Task                  string            `json:"task,omitempty"`
+	Files                 []string          `json:"files,omitempty"`
+	Symbols               []string          `json:"symbols,omitempty"`
+	Commands              []string          `json:"commands,omitempty"`
+	ErrorSignature        string            `json:"error_signature,omitempty"`
+	DiffRef               string            `json:"diff_ref,omitempty"`
+	IncludeStale          bool              `json:"include_stale,omitempty"`
+	Threshold             int               `json:"threshold,omitempty"`
+	TopK                  int               `json:"top_k,omitempty"`
+	InstalledDependencies map[string]string `json:"installed_dependencies,omitempty"`
 }
 
 // ScoredScar represents a candidate scar with match scoring details.
@@ -98,7 +99,22 @@ func ScoreScarItem(s *Scar, q QueryOptions) ScoredScar {
 		res.Matches = append(res.Matches, "symbol(+4)")
 	}
 
-	// 3. Error signature match (+3)
+	// 3. Exact dependency and compatible version match (+3)
+	depMatched := false
+	if len(q.InstalledDependencies) > 0 {
+		for _, da := range s.Anchors.Dependencies {
+			if MatchDependency(q.InstalledDependencies, da) {
+				depMatched = true
+				break
+			}
+		}
+	}
+	if depMatched {
+		score += 3
+		res.Matches = append(res.Matches, "dependency(+3)")
+	}
+
+	// 4. Error signature match (+3)
 	if q.ErrorSignature != "" {
 		for _, es := range s.Anchors.ErrorSignatures {
 			if es != "" && (strings.Contains(strings.ToLower(q.ErrorSignature), strings.ToLower(es)) ||
@@ -200,6 +216,10 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 		if err == nil {
 			q.Files = append(q.Files, diffFiles...)
 		}
+	}
+
+	if q.InstalledDependencies == nil {
+		q.InstalledDependencies = GetRepoDependencies(s.RepoRoot)
 	}
 
 	scars, err := s.ListScars()

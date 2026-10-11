@@ -1,0 +1,60 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Release Multi-Arch Binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+          check-latest: true
+
+      - name: Build cross-platform release artifacts
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          mkdir -p dist
+          PLATFORMS=(
+            "linux/amd64/git-scars-linux-amd64"
+            "linux/arm64/git-scars-linux-arm64"
+            "darwin/amd64/git-scars-darwin-amd64"
+            "darwin/arm64/git-scars-darwin-arm64"
+            "windows/amd64/git-scars-windows-amd64.exe"
+          )
+
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            IFS="/" read -r OS ARCH BIN <<< "$PLATFORM"
+            echo "Building for $OS/$ARCH -> $BIN..."
+            GOOS=$OS GOARCH=$ARCH CGO_ENABLED=0 go build -ldflags="-s -w" -o "dist/$BIN" ./cmd/git-scars
+            if [ "$OS" = "windows" ]; then
+              (cd dist && zip "$BIN.zip" "$BIN" && rm "$BIN")
+            else
+              (cd dist && tar -czf "$BIN.tar.gz" "$BIN" && rm "$BIN")
+            fi
+          done
+
+          # Generate SHA256 checksums
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

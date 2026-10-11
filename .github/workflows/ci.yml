@@ -47,4 +47,5 @@ jobs:
           go build -o /tmp/git-scars ./cmd/git-scars
           /tmp/git-scars lint
           /tmp/git-scars check
+          /tmp/git-scars doctor
 

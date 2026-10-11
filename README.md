@@ -104,7 +104,12 @@ git-scars init
 Creates `.gitscars/scars/` for versioned lessons and `.gitscars/.local/` (automatically gitignored) for derived local state (indexes, trusted verifier hashes, feedback).
 
 ### 2. Capture a Failure Lesson
-Create a new draft manually:
+Create a new draft using the interactive terminal wizard:
+```bash
+git-scars add -i
+```
+
+Or pass flags directly:
 ```bash
 git-scars add \
   --title "Nil pointer dereference in auth context" \
@@ -194,6 +199,16 @@ git-scars stats
 
 # Machine-readable JSON metrics
 git-scars stats --json
+```
+
+### 10. Run Full Diagnostics
+Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
+```bash
+# Interactive diagnostic checklist
+git-scars doctor
+
+# Machine-readable JSON report for CI pipelines
+git-scars doctor --json
 ```
 
 ---
@@ -341,7 +356,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
 | `init` | none | Initialize `.gitscars/` repository metadata and default config |
-| `add` | `--title`, `--lesson`, `--files` | Create a new scar draft |
+| `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
 | `show` | `<id>` | Display full metadata, anchors, and body of a scar |
@@ -353,6 +368,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
 | `lint` | none | Security and schema audit (checks traversal, injections, duplicate titles) |
+| `doctor` | `[--json]` | Run repository diagnostics across Git, store, schemas, invariants, drift, hooks, and index |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |
@@ -376,7 +392,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0007).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0008).
 
 ---
 

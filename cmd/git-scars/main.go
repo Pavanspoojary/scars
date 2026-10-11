@@ -62,6 +62,8 @@ func run(args []string) error {
 		return runHook(store, args[1:])
 	case "index":
 		return runIndex(store, args[1:])
+	case "diff":
+		return runDiff(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -85,6 +87,7 @@ Lifecycle Commands:
   add             Create a new scar draft (manual or --title/--lesson/--files)
   list            List recorded scars with lifecycle, review, and dynamic freshness
   show <id>       Display full metadata and lesson for a scar
+  diff <id>       Show diff between anchor files and recorded baseline
   promote <id>    Promote a scar to active state (enforces review & verifier invariants)
   reaffirm <id>   Reaffirm a scar after anchor code drift with human rationale
   retire <id>     Retire a scar that is no longer applicable
@@ -599,5 +602,47 @@ func runIndex(store *scar.Store, args []string) error {
 		return fmt.Errorf("failed rebuilding index: %w", err)
 	}
 	fmt.Printf("Rebuilt local index with %d scars in %s\n", idx.TotalScars, filepath.Join(store.LocalDir, scar.IndexFileName))
+	return nil
+}
+
+func runDiff(store *scar.Store, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("diff requires a scar ID or filename")
+	}
+
+	sc, _, err := store.LoadScar(args[0])
+	if err != nil {
+		return err
+	}
+
+	results, err := store.DiffScarAnchors(sc)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("=== Anchor Baseline Diff for %s (%s) ===\n", sc.ID, sc.Title)
+	allCurrent := true
+	for _, res := range results {
+		switch res.Status {
+		case "current":
+			fmt.Printf("✓ [current] %s\n", res.FilePath)
+		case "modified":
+			allCurrent = false
+			fmt.Printf("✗ [MODIFIED] %s:\n%s\n", res.FilePath, res.Diff)
+		case "missing":
+			allCurrent = false
+			fmt.Printf("! [MISSING] %s\n", res.FilePath)
+		case "unrecorded":
+			allCurrent = false
+			fmt.Printf("? [UNRECORDED] %s\n", res.FilePath)
+		}
+	}
+
+	if allCurrent {
+		fmt.Println("All anchor baselines are current with working tree.")
+	} else {
+		fmt.Printf("\nTo reaffirm modified baselines after review: git-scars reaffirm %s\n", sc.ID)
+	}
+
 	return nil
 }

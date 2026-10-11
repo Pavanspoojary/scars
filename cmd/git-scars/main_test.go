@@ -197,4 +197,9 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"index"}); err != nil {
 		t.Fatalf("index rebuild failed: %v", err)
 	}
+
+	// 8. Diff anchor baseline
+	if err := run([]string{"diff", s.ID}); err != nil {
+		t.Fatalf("diff command failed: %v", err)
+	}
 }

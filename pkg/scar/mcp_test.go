@@ -60,8 +60,8 @@ func TestMCPServerHandshakeAndTools(t *testing.T) {
 	}
 	toolsMap := resp2.Result.(map[string]interface{})
 	tools := toolsMap["tools"].([]interface{})
-	if len(tools) != 6 {
-		t.Errorf("expected 6 tools in tools/list, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("expected 9 tools in tools/list, got %d", len(tools))
 	}
 
 	// Response 3: recall_scars
@@ -74,6 +74,83 @@ func TestMCPServerHandshakeAndTools(t *testing.T) {
 	text := contents[0].(map[string]interface{})["text"].(string)
 	if !strings.Contains(text, "DNS Resolution Hang") {
 		t.Errorf("expected recall result to contain scar title, got: %s", text)
+	}
+}
+
+func TestMCPServerCompositeTools(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "gitscars-mcp-composite-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewStore(tmpDir)
+	_ = store.Init()
+
+	// Seed an active scar with severity high
+	s, _, _ := store.CreateDraft("Worker Deadlock", "Buffer worker channel", []string{"pkg/worker.go"})
+	s.Lifecycle.State = LifecycleActive
+	s.Review.Status = ReviewApproved
+	s.Verifier.Result = VerificationFailToPass
+	s.Severity = "high"
+	s.FixHint = "Buffer task channel"
+	s.BadPattern = "make(chan int)"
+	s.GoodPattern = "make(chan int, 10)"
+	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/worker.go"), []byte("package worker\n"), 0644)
+	_ = store.RecordBaseline(s, "hash-worker")
+	_, _ = store.SaveScar(s)
+
+	// Test 1: pre_edit_check
+	reqPreEdit := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"pre_edit_check","arguments":{"files":["pkg/worker.go"],"fail_on":"high"}}}` + "\n"
+	// Test 2: plan_task
+	reqPlan := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"plan_task","arguments":{"task":"refactor worker channel","files":["pkg/worker.go"]}}}` + "\n"
+	// Test 3: post_failure_learn
+	reqLearn := `{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"post_failure_learn","arguments":{"error_output":"fatal error: all goroutines asleep - deadlock!\npkg/worker.go:10 +0x25\n"}}}` + "\n"
+
+	in := bytes.NewBufferString(reqPreEdit + reqPlan + reqLearn)
+	out := new(bytes.Buffer)
+
+	if err := store.ServeMCP(in, out); err != nil {
+		t.Fatalf("ServeMCP error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected 3 responses, got %d: %s", len(lines), out.String())
+	}
+
+	// 1. Verify pre_edit_check response
+	var respPreEdit JSONRPCResponse
+	if err := json.Unmarshal([]byte(lines[0]), &respPreEdit); err != nil {
+		t.Fatalf("failed unmarshaling pre_edit_check resp: %v", err)
+	}
+	preEditMap := respPreEdit.Result.(map[string]interface{})
+	preEditContent := preEditMap["content"].([]interface{})
+	preEditText := preEditContent[0].(map[string]interface{})["text"].(string)
+	if !strings.Contains(preEditText, `"blocked": true`) && !strings.Contains(preEditText, `"blocked":true`) {
+		t.Errorf("expected pre_edit_check to be blocked, got: %s", preEditText)
+	}
+
+	// 2. Verify plan_task response
+	var respPlan JSONRPCResponse
+	if err := json.Unmarshal([]byte(lines[1]), &respPlan); err != nil {
+		t.Fatalf("failed unmarshaling plan_task resp: %v", err)
+	}
+	planMap := respPlan.Result.(map[string]interface{})
+	planContent := planMap["content"].([]interface{})
+	planText := planContent[0].(map[string]interface{})["text"].(string)
+	if !strings.Contains(planText, "Worker Deadlock") {
+		t.Errorf("expected plan_task to contain scar, got: %s", planText)
+	}
+
+	// 3. Verify post_failure_learn response
+	var respLearn JSONRPCResponse
+	if err := json.Unmarshal([]byte(lines[2]), &respLearn); err != nil {
+		t.Fatalf("failed unmarshaling post_failure_learn resp: %v", err)
+	}
+	learnMap := respLearn.Result.(map[string]interface{})
+	learnContent := learnMap["content"].([]interface{})
+	learnText := learnContent[0].(map[string]interface{})["text"].(string)
+	if !strings.Contains(learnText, "Worker Deadlock") {
+		t.Errorf("expected post_failure_learn to triage deadlock, got: %s", learnText)
 	}
 }
 

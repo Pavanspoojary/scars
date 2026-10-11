@@ -65,3 +65,52 @@ pkg/worker.go:45`
 		t.Errorf("expected matched scar %s, got %s", s.ID, res.Matches[0].Scar.ID)
 	}
 }
+
+func TestParseFailureLogMultiLanguage(t *testing.T) {
+	// 1. Python Traceback
+	pyLog := `Traceback (most recent call last):
+  File "app/server.py", line 45, in handle_request
+    db.connect()
+  File "pkg/db.py", line 12, in connect
+ConnectionRefusedError: Unable to connect to host 127.0.0.1:5432`
+
+	pyCtx := ParseFailureLog(pyLog)
+	if pyCtx.Language != "python" {
+		t.Errorf("expected python language, got %s", pyCtx.Language)
+	}
+	if len(pyCtx.Files) < 2 || pyCtx.Files[0] != "app/server.py" {
+		t.Errorf("expected python files extracted, got %v", pyCtx.Files)
+	}
+	if len(pyCtx.Symbols) == 0 || pyCtx.Symbols[0] != "handle_request" {
+		t.Errorf("expected symbol handle_request, got %v", pyCtx.Symbols)
+	}
+
+	// 2. TypeScript / Node.js Error
+	tsLog := `TypeError: Cannot read properties of undefined (reading 'token')
+    at Authenticator.verify (src/auth/service.ts:89:14)
+    at handleAuth (src/api/routes.ts:32:10)`
+
+	tsCtx := ParseFailureLog(tsLog)
+	if tsCtx.Language != "javascript" {
+		t.Errorf("expected javascript language, got %s", tsCtx.Language)
+	}
+	if len(tsCtx.Files) < 2 || tsCtx.Files[0] != "src/auth/service.ts" {
+		t.Errorf("expected ts files extracted, got %v", tsCtx.Files)
+	}
+	if len(tsCtx.Symbols) == 0 || tsCtx.Symbols[0] != "Authenticator.verify" {
+		t.Errorf("expected symbol Authenticator.verify, got %v", tsCtx.Symbols)
+	}
+
+	// 3. Rust panic
+	rustLog := `thread 'main' panicked at 'assertion failed: lock.is_locked()', src/sync/mutex.rs:114:9
+stack backtrace:
+   0: rust_begin_unwind`
+
+	rsCtx := ParseFailureLog(rustLog)
+	if rsCtx.Language != "rust" {
+		t.Errorf("expected rust language, got %s", rsCtx.Language)
+	}
+	if len(rsCtx.Files) == 0 || rsCtx.Files[0] != "src/sync/mutex.rs" {
+		t.Errorf("expected rust file src/sync/mutex.rs, got %v", rsCtx.Files)
+	}
+}

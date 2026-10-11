@@ -177,7 +177,13 @@ git-scars sync --targets AGENTS.md,CLAUDE.md
 *Manages a deterministic markdown table between `<!-- GIT-SCARS:START -->` and `<!-- GIT-SCARS:END -->` markers, preserving all external prompt rules.*
 
 ### 8. Instant Failure & Test Triage
-Diagnose raw compiler errors, panic stack traces, or test failures directly against recorded regression wisdom:
+Diagnose raw compiler errors, panic stack traces, or test failures directly against recorded regression wisdom across multiple languages:
+- **Go**: `panic:`, `fatal error: all goroutines asleep - deadlock`, `--- FAIL:`, race detector warnings, and runtime file/line locations.
+- **Python**: `Traceback (most recent call last)`, `File "...", line N, in func`, `AssertionError`.
+- **JavaScript & TypeScript**: V8 stack traces `at func (file:line:col)`, `Error:`, `TypeError`.
+- **Rust**: `thread '...' panicked at '...'`, source locations `src/file.rs:N`.
+- **Generic / Runners**: Memory faults (`Segmentation fault`), test framework failures, and race reports.
+
 ```bash
 # Pipe failing test output directly to triage
 go test ./... 2>&1 | git-scars triage
@@ -313,13 +319,18 @@ git-scars mcp
 
 The MCP server exposes rich two-way tools and resources for AI coding agents:
 
-#### Tools:
+#### Standard Tools:
 - `list_scars`: List all repository scars with their lifecycle and dynamic freshness status.
 - `get_scar`: Retrieve full frontmatter, anchors, verifier results, and markdown body by scar ID.
 - `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, and commands.
 - `inject_guardrails`: Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files.
 - `triage_error`: Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars.
 - `draft_scar`: Autonomously record a new failure memory draft into repository Git memory.
+
+#### Composite Tools (Single-Roundtrip Workflow):
+- `pre_edit_check`: Pre-edit blocking guardrail check. Inspects target files and symbols before file modifications and returns blocking scars with actionable do/don't patterns and verification commands.
+- `plan_task`: Combines selective recall and token-budget prompt injection into a single roundtrip for task planning.
+- `post_failure_learn`: Multi-language failure triage and diagnostic learning in a single roundtrip, returning prevention lessons for test errors or stack traces.
 
 #### Resources:
 - `scar://<id>`: Read individual scar frontmatter and prevention lessons directly as MCP resources.

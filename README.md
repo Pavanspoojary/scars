@@ -134,6 +134,16 @@ git-scars reaffirm map-write-crash-391945 \
   --rationale "Verified logic holds after refactoring exporter package"
 ```
 
+### 9. Repository Health & Metrics
+Inspect overall repository scar metrics, monitored anchors, and recorded feedback:
+```bash
+# Human-readable summary
+git-scars stats
+
+# Machine-readable JSON metrics
+git-scars stats --json
+```
+
 ---
 
 ## File Format & Repository Storage

@@ -1,6 +1,6 @@
-# Contributing to si-scars
+# Contributing to GitScars (`scars`)
 
-Thank you for your interest in contributing to `si-scars`! We welcome contributions from the community.
+Thank you for your interest in contributing to `git-scars`! We welcome contributions from the community.
 
 ## Getting Started
 
@@ -10,10 +10,11 @@ Thank you for your interest in contributing to `si-scars`! We welcome contributi
 
 2. **Clone and Branch**:
    ```bash
-   git clone https://github.com/Pavanspoojary/si-scars.git
-   cd si-scars
+   git clone https://github.com/Pavanspoojary/scars.git
+   cd scars
    git checkout -b feat/your-feature-name
    ```
+
 
 ## Development Workflow
 

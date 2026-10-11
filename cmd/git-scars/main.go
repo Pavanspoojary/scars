@@ -16,7 +16,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -61,6 +61,12 @@ func run(args []string) error {
 		return runRetire(store, args[1:])
 	case "reaffirm":
 		return runReaffirm(store, args[1:])
+	case "contradict":
+		return runContradict(store, args[1:])
+	case "supersede":
+		return runSupersede(store, args[1:])
+	case "dedupe":
+		return runDedupe(store, args[1:])
 	case "mcp":
 		return store.ServeMCP(os.Stdin, os.Stdout)
 	case "hook":
@@ -105,6 +111,8 @@ Lifecycle Commands:
   diff <id>       Show diff between anchor files and recorded baseline
   promote <id>    Promote a scar to active state (enforces review & verifier invariants)
   reaffirm <id>   Reaffirm a scar after anchor code drift with human rationale
+  contradict <id> Transition scar to contradicted state (--by <new-id>, --rationale)
+  supersede <id>  Supersede scar with successor scar (--by <new-id>)
   retire <id>     Retire a scar that is no longer applicable
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
@@ -112,9 +120,10 @@ Lifecycle Commands:
   inject          Generate token-budgeted prompt guardrails for AI agents
   sync            Synchronize active scars into AGENTS.md / CLAUDE.md
   triage          Diagnose test failures and panic traces against scars (--error/stdin)
+  dedupe          Detect duplicate and near-duplicate scars (--min, --dry-run, --json)
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
-  doctor          Run repository diagnostics and health checks (--json)
+  doctor          Run repository diagnostics and health checks (--json, --fix)
   stats           Display repository metrics and feedback statistics (--json)
   index           Rebuild .gitscars/.local/index.json fast cache
   hook            Manage Git pre-commit hook (install, uninstall, status)
@@ -340,6 +349,10 @@ func runShow(store *scar.Store, args []string) error {
 	if len(s.Anchors.Symbols) > 0 {
 		fmt.Printf("Anchored Symbols: %s\n", strings.Join(s.Anchors.Symbols, ", "))
 	}
+	if q, err := store.GetScarQuality(s.ID); err == nil && q.Total > 0 {
+		fmt.Printf("Feedback Quality: Score %.2f (Helpful: %d, Irrelevant: %d, Incorrect: %d, Total: %d)\n",
+			q.Score, q.Helpful, q.Irrelevant, q.Incorrect, q.Total)
+	}
 	fmt.Printf("\n--- Lesson ---\n%s\n", s.Lesson)
 	return nil
 }
@@ -424,6 +437,95 @@ func runReaffirm(store *scar.Store, args []string) error {
 
 	fmt.Printf("Reaffirmed scar %s by %s. Anchor baseline updated to current tree.\n", reaffirmed.ID, *reviewer)
 	return nil
+}
+
+func runContradict(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("contradict", flag.ContinueOnError)
+	by := fs.String("by", "", "Successor or conflicting scar ID")
+	rationale := fs.String("rationale", "", "Rationale explaining why this scar is contradicted")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars contradict <id> --by <new-id> [--rationale <reason>]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	if *by == "" {
+		return fmt.Errorf("contradict requires --by <new-id>")
+	}
+
+	scar, err := store.ContradictScar(id, *by, *rationale)
+	if err != nil {
+		return fmt.Errorf("failed contradicting scar %s: %w", id, err)
+	}
+
+	fmt.Printf("Successfully transitioned scar %s to state %q (conflicts with %s)\n", scar.ID, scar.Lifecycle.State, *by)
+	return nil
+}
+
+func runSupersede(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("supersede", flag.ContinueOnError)
+	by := fs.String("by", "", "Successor scar ID that supersedes this scar")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars supersede <old-id> --by <new-id>")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	if *by == "" {
+		return fmt.Errorf("supersede requires --by <new-id>")
+	}
+
+	scar, err := store.SupersedeScar(id, *by)
+	if err != nil {
+		return fmt.Errorf("failed superseding scar %s: %w", id, err)
+	}
+
+	fmt.Printf("Successfully superseded scar %s by successor %s (state: %q)\n", scar.ID, *by, scar.Lifecycle.State)
+	return nil
+}
+
+func runDedupe(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("dedupe", flag.ContinueOnError)
+	minSim := fs.Float64("min", 0.85, "Minimum Jaccard lexical similarity threshold (0.0 - 1.0)")
+	dryRun := fs.Bool("dry-run", true, "Perform dry-run inspection without altering scar records")
+	jsonOut := fs.Bool("json", false, "Output duplicate candidate pairs in JSON")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	candidates, err := store.FindDuplicates(*minSim)
+	if err != nil {
+		return fmt.Errorf("failed analyzing duplicate scars: %w", err)
+	}
+
+	if *jsonOut {
+		data, err := json.MarshalIndent(candidates, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	if len(candidates) == 0 {
+		fmt.Printf("No duplicate or near-duplicate scars found (threshold: %.2f).\n", *minSim)
+		return nil
+	}
+
+	fmt.Printf("Discovered %d candidate duplicate pair(s) (threshold: %.2f, dry-run: %v):\n\n", len(candidates), *minSim, *dryRun)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "SIMILARITY\tSCAR A\tSCAR B\tRECOMMENDED ACTION")
+	for _, c := range candidates {
+		fmt.Fprintf(w, "%.2f\t%s\t%s\t%s\n", c.Similarity, c.ScarA.ID, c.ScarB.ID, c.Suggestion)
+	}
+	return w.Flush()
 }
 
 func runRecall(store *scar.Store, args []string) error {
@@ -578,6 +680,20 @@ func runLint(store *scar.Store, args []string) error {
 
 	crossFindings := scar.LintCollection(allScars)
 	allFindings = append(allFindings, crossFindings...)
+
+	qualities, _ := store.GetAllScarQualities()
+	if qualities != nil {
+		for _, s := range allScars {
+			if q, ok := qualities[s.ID]; ok && q.Incorrect >= 3 {
+				allFindings = append(allFindings, scar.LintFinding{
+					ScarID:   s.ID,
+					Severity: "WARNING",
+					Rule:     "noisy_scar",
+					Message:  fmt.Sprintf("scar has accumulated %d incorrect feedback ratings; consider updating anchors, superseding, or retiring", q.Incorrect),
+				})
+			}
+		}
+	}
 
 	if len(allFindings) == 0 {
 		fmt.Printf("Lint clean: %d scars audited with zero findings.\n", len(allScars))
@@ -748,20 +864,42 @@ func runStats(store *scar.Store, args []string) error {
 }
 
 func runDoctor(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "Output diagnostic report in JSON")
+	fix := fs.Bool("fix", false, "Automatically repair recoverable configuration, cache, and hook issues")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *fix {
+		actions, err := store.FixDoctor()
+		if err != nil {
+			return fmt.Errorf("doctor --fix error: %w", err)
+		}
+		if len(actions) == 0 {
+			fmt.Println("No automated repairs required.")
+		} else {
+			fmt.Println("Applied automated repairs:")
+			for _, act := range actions {
+				fmt.Printf("  ✓ %s\n", act)
+			}
+			fmt.Println()
+		}
+	}
+
 	report := store.RunDoctor()
 
-	for _, a := range args {
-		if a == "--json" {
-			data, err := json.MarshalIndent(report, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(data))
-			if !report.Healthy {
-				return fmt.Errorf("doctor detected %d diagnostic failure(s)", report.Errors)
-			}
-			return nil
+	if *jsonOut {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
 		}
+		fmt.Println(string(data))
+		if !report.Healthy {
+			return fmt.Errorf("doctor detected %d diagnostic failure(s)", report.Errors)
+		}
+		return nil
 	}
 
 	fmt.Println("=== GitScars System Diagnostics ===")

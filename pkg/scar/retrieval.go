@@ -328,6 +328,23 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 		q.InstalledDependencies = GetRepoDependencies(s.RepoRoot)
 	}
 
+	qualities, _ := s.GetAllScarQualities()
+	applyFeedbackPenalty := func(scored *ScoredScar) {
+		if qualities == nil || scored.Scar == nil {
+			return
+		}
+		q, ok := qualities[scored.Scar.ID]
+		if !ok {
+			return
+		}
+		if q.Incorrect >= 2 || (q.Total >= 3 && q.Helpful == 0) {
+			scored.Score -= 2
+			scored.Matches = append(scored.Matches, "feedback_penalty(-2)")
+			scored.Explanation = strings.Join(scored.Matches, ", ")
+			scored.Confidence = ConfidenceForScore(scored.Score)
+		}
+	}
+
 	var candidates []ScoredScar
 
 	// Fast-path: score candidates directly from in-memory index cache if fresh
@@ -352,7 +369,8 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 				},
 			}
 			scored := ScoreScarItem(scarStub, q)
-			if scored.Score >= threshold {
+			// Check potential score with feedback before loading from disk
+			if scored.Score >= threshold-2 {
 				fullScar, _, err := s.LoadScar(entry.ID)
 				if err != nil {
 					continue
@@ -363,7 +381,10 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 				}
 				scored.Scar = fullScar
 				scored.Freshness = freshness
-				candidates = append(candidates, scored)
+				applyFeedbackPenalty(&scored)
+				if scored.Score >= threshold {
+					candidates = append(candidates, scored)
+				}
 			}
 		}
 	} else {
@@ -388,6 +409,7 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 
 			scored := ScoreScarItem(scar, q)
 			scored.Freshness = summary.Freshness
+			applyFeedbackPenalty(&scored)
 
 			if scored.Score >= threshold {
 				candidates = append(candidates, scored)

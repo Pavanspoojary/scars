@@ -272,6 +272,41 @@ func (s *Scar) Retire(rationale string) error {
 	return s.ValidateInvariants()
 }
 
+// Contradict marks a scar as contradicted by another scar with documented rationale.
+func (s *Scar) Contradict(byScarID, rationale string) error {
+	s.Lifecycle.State = LifecycleContradicted
+	if byScarID != "" {
+		found := false
+		for _, c := range s.Lifecycle.ConflictsWith {
+			if c == byScarID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.Lifecycle.ConflictsWith = append(s.Lifecycle.ConflictsWith, byScarID)
+		}
+	}
+	if rationale != "" {
+		if s.Review.Rationale != "" {
+			s.Review.Rationale = s.Review.Rationale + " | Contradicted: " + rationale
+		} else {
+			s.Review.Rationale = "Contradicted: " + rationale
+		}
+	}
+	return s.ValidateInvariants()
+}
+
+// Supersede marks a scar as superseded by a successor scar.
+func (s *Scar) Supersede(byScarID string) error {
+	if strings.TrimSpace(byScarID) == "" {
+		return errors.New("supersede requires successor scar ID")
+	}
+	s.Lifecycle.State = LifecycleSuperseded
+	s.Lifecycle.SupersededBy = byScarID
+	return s.ValidateInvariants()
+}
+
 // RandomShortID generates a cryptographically secure random alphanumeric ID of length n.
 func RandomShortID(length int) (string, error) {
 	bytes := make([]byte, (length+1)/2)

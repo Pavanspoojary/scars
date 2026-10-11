@@ -3,6 +3,7 @@ package scar
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -101,5 +102,35 @@ func TestStoreRunDoctorMissingStore(t *testing.T) {
 	}
 	if report.Errors == 0 {
 		t.Errorf("expected errors when .git and .gitscars are missing")
+	}
+}
+
+func TestStoreFixDoctor(t *testing.T) {
+	tmpDir := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
+
+	store := NewStore(tmpDir)
+	_ = store.Init()
+
+	// Intentionally remove index.json
+	_ = os.Remove(filepath.Join(store.LocalDir, "index.json"))
+
+	actions, err := store.FixDoctor()
+	if err != nil {
+		t.Fatalf("FixDoctor failed: %v", err)
+	}
+	if len(actions) == 0 {
+		t.Errorf("expected repair actions, got 0")
+	}
+
+	// Verify index was rebuilt
+	if _, err := os.Stat(filepath.Join(store.LocalDir, "index.json")); os.IsNotExist(err) {
+		t.Errorf("expected index.json to be recreated by FixDoctor")
+	}
+
+	// Verify .gitscars/.gitignore contains .local/
+	gitignoreData, err := os.ReadFile(filepath.Join(store.RepoRoot, DefaultStoreDir, ".gitignore"))
+	if err != nil || !strings.Contains(string(gitignoreData), ".local/") {
+		t.Errorf("expected .local/ in .gitscars/.gitignore, got: %s", string(gitignoreData))
 	}
 }

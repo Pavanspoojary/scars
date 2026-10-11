@@ -241,7 +241,7 @@ git-scars stats
 git-scars stats --json
 ```
 
-### 13. Run Full Diagnostics
+### 13. Run Full Diagnostics & Automated Repair
 Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
@@ -249,6 +249,29 @@ git-scars doctor
 
 # Machine-readable JSON report for CI pipelines
 git-scars doctor --json
+
+# Automatically repair recoverable cache, local directory, and hook configurations
+git-scars doctor --fix
+```
+
+### 14. Lifecycle Contradiction & Supersession
+Manage evolution of failure memories as codebase architectures and best practices evolve:
+```bash
+# Contradict an outdated scar with documented rationale and conflict reference
+git-scars contradict scar-001 --by scar-005 --rationale "Worker pool refactored to context cancellation"
+
+# Supersede an obsolete scar by a successor scar
+git-scars supersede scar-001 --by scar-005
+```
+
+### 15. Near-Duplicate Scar Detection
+Inspect active repository scars for semantic and lexical duplication using token-level Jaccard similarity:
+```bash
+# Dry-run near-duplicate audit (default threshold: 0.85)
+git-scars dedupe --dry-run
+
+# Custom similarity threshold and machine-readable JSON
+git-scars dedupe --min 0.75 --json
 ```
 
 ---
@@ -449,15 +472,18 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `promote` | `<id> --status active` | Promote a scar to active state (enforces review & verifier invariants) |
 | `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence |
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
+| `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
+| `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
 | `enforce` | `--files`, `[--fail-on, --staged, --json]` | Pre-edit blocking guardrail check (exit `0` clean, exit `2` blocked) |
 | `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
 | `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
+| `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
-| `lint` | none | Security and schema audit (checks traversal, injections, duplicate titles) |
-| `doctor` | `[--json]` | Run repository diagnostics across Git, store, schemas, invariants, drift, hooks, and index |
+| `lint` | none | Security and schema audit (checks traversal, injections, noisy scars) |
+| `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |

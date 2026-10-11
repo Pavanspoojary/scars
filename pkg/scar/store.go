@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Store manages loading, creating, and updating Scar records on disk.
@@ -172,30 +173,61 @@ func (s *Store) ListScars() ([]ScarSummary, error) {
 		return nil, fmt.Errorf("failed reading scars directory: %w", err)
 	}
 
-	var results []ScarSummary
+	var mdFiles []string
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			mdFiles = append(mdFiles, filepath.Join(s.ScarsDir, e.Name()))
 		}
-
-		path := filepath.Join(s.ScarsDir, e.Name())
-		data, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-
-		scar, err := ParseFrontmatter(data)
-		if err != nil {
-			continue
-		}
-
-		freshness := s.ComputeFreshness(scar)
-		results = append(results, ScarSummary{
-			Scar:      scar,
-			FilePath:  path,
-			Freshness: freshness,
-		})
 	}
+
+	if len(mdFiles) == 0 {
+		return nil, nil
+	}
+
+	workers := 8
+	if len(mdFiles) < workers {
+		workers = len(mdFiles)
+	}
+
+	jobs := make(chan string, len(mdFiles))
+	for _, p := range mdFiles {
+		jobs <- p
+	}
+	close(jobs)
+
+	var (
+		mu      sync.Mutex
+		results []ScarSummary
+		wg      sync.WaitGroup
+	)
+
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for path := range jobs {
+				data, err := os.ReadFile(path)
+				if err != nil {
+					continue
+				}
+				scar, err := ParseFrontmatter(data)
+				if err != nil {
+					continue
+				}
+				freshness := s.ComputeFreshness(scar)
+				summary := ScarSummary{
+					Scar:      scar,
+					FilePath:  path,
+					Freshness: freshness,
+				}
+				mu.Lock()
+				results = append(results, summary)
+				mu.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
 
 	// Sort stably by ID
 	sort.Slice(results, func(i, j int) bool {
@@ -212,17 +244,62 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 		return FreshnessUnavailable
 	}
 
+	if len(scar.Baseline.AnchorHashes) == 1 {
+		for relPath, expectedHash := range scar.Baseline.AnchorHashes {
+			fullPath := filepath.Join(s.RepoRoot, relPath)
+			currentHash, err := hashFile(fullPath)
+			if err != nil {
+				return FreshnessUnavailable
+			}
+			if currentHash != expectedHash {
+				return FreshnessChanged
+			}
+		}
+		return FreshnessCurrent
+	}
+
+	type checkResult struct {
+		unavailable bool
+		changed     bool
+	}
+
+	results := make(chan checkResult, len(scar.Baseline.AnchorHashes))
+	var wg sync.WaitGroup
+
 	for relPath, expectedHash := range scar.Baseline.AnchorHashes {
-		fullPath := filepath.Join(s.RepoRoot, relPath)
-		currentHash, err := hashFile(fullPath)
-		if err != nil {
+		wg.Add(1)
+		go func(rp, exp string) {
+			defer wg.Done()
+			fullPath := filepath.Join(s.RepoRoot, rp)
+			curr, err := hashFile(fullPath)
+			if err != nil {
+				results <- checkResult{unavailable: true}
+				return
+			}
+			if curr != exp {
+				results <- checkResult{changed: true}
+				return
+			}
+			results <- checkResult{}
+		}(relPath, expectedHash)
+	}
+
+	wg.Wait()
+	close(results)
+
+	hasChanged := false
+	for r := range results {
+		if r.unavailable {
 			return FreshnessUnavailable
 		}
-		if currentHash != expectedHash {
-			return FreshnessChanged
+		if r.changed {
+			hasChanged = true
 		}
 	}
 
+	if hasChanged {
+		return FreshnessChanged
+	}
 	return FreshnessCurrent
 }
 
@@ -288,4 +365,57 @@ func (s *Store) Reaffirm(id, reviewer, rationale string) (*Scar, error) {
 	}
 
 	return scar, nil
+}
+
+// ContradictScar transitions a scar to contradicted state with a conflict reference and rationale.
+func (s *Store) ContradictScar(oldID, byID, rationale string) (*Scar, error) {
+	scar, _, err := s.LoadScar(oldID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := scar.Contradict(byID, rationale); err != nil {
+		return nil, err
+	}
+
+	if _, err := s.SaveScar(scar); err != nil {
+		return nil, err
+	}
+
+	_, _ = s.RebuildIndex()
+	return scar, nil
+}
+
+// SupersedeScar transitions a scar to superseded state by a successor scar.
+func (s *Store) SupersedeScar(oldID, byID string) (*Scar, error) {
+	oldScar, _, err := s.LoadScar(oldID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := oldScar.Supersede(byID); err != nil {
+		return nil, err
+	}
+
+	if _, err := s.SaveScar(oldScar); err != nil {
+		return nil, err
+	}
+
+	// Also record superseded ID in successor scar if successor exists
+	if newScar, _, err := s.LoadScar(byID); err == nil {
+		found := false
+		for _, sup := range newScar.Lifecycle.Supersedes {
+			if sup == oldID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			newScar.Lifecycle.Supersedes = append(newScar.Lifecycle.Supersedes, oldID)
+			_, _ = s.SaveScar(newScar)
+		}
+	}
+
+	_, _ = s.RebuildIndex()
+	return oldScar, nil
 }

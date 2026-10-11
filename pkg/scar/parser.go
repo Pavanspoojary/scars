@@ -376,6 +376,18 @@ func FormatFrontmatter(s *Scar) ([]byte, error) {
 	if s.Lifecycle.SupersededBy != "" {
 		buf.WriteString(fmt.Sprintf("  superseded_by: %s\n", strconv.Quote(s.Lifecycle.SupersededBy)))
 	}
+	if len(s.Lifecycle.ConflictsWith) > 0 {
+		buf.WriteString("  conflicts_with:\n")
+		for _, c := range s.Lifecycle.ConflictsWith {
+			buf.WriteString(fmt.Sprintf("    - %s\n", strconv.Quote(c)))
+		}
+	}
+	if len(s.Lifecycle.Supersedes) > 0 {
+		buf.WriteString("  supersedes:\n")
+		for _, sup := range s.Lifecycle.Supersedes {
+			buf.WriteString(fmt.Sprintf("    - %s\n", strconv.Quote(sup)))
+		}
+	}
 
 	buf.WriteString("---\n\n")
 	if s.Body != "" {

@@ -27,3 +27,18 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Retain and confirm the **Apache License 2.0**.
 - **Consequences**:
   - Provides a permissive open-source license with explicit patent protection grants and trademark restrictions suitable for developer tooling.
+
+---
+
+## ADR-0003: Namespace and Project Identity Selection
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Stage 0a namespace evaluation to avoid collisions across GitHub, package registries, and developer tooling (specifically `scar-cli`, `fscars`, and `gitmem`).
+- **Decision**:
+  - Adopt **`git-scars`** as the canonical CLI binary name and package namespace.
+  - Adopt **`.gitscars/`** as the repository metadata directory containing committed scars (`.gitscars/scars/`) and gitignored local state (`.gitscars/.local/`).
+  - Discard generic `reposcars` and naked `scar` to eliminate naming confusion with existing tools.
+- **Consequences**:
+  - Provides natural Git integration (`git scars ...`), clean packaging, and avoids collisions with existing Python `scar-cli` or `fscars`.
+

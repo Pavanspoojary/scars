@@ -72,6 +72,8 @@ func run(args []string) error {
 		return runDoctor(store, args[1:])
 	case "inject":
 		return runInject(store, args[1:])
+	case "sync":
+		return runSync(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -102,6 +104,7 @@ Lifecycle Commands:
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
   inject          Generate token-budgeted prompt guardrails for AI agents
+  sync            Synchronize active scars into AGENTS.md / CLAUDE.md
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
   doctor          Run repository diagnostics and health checks (--json)
@@ -810,6 +813,41 @@ func runInject(store *scar.Store, args []string) error {
 
 	if snippet != "" {
 		fmt.Println(snippet)
+	}
+	return nil
+}
+
+func runSync(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	targetsStr := fs.String("targets", "", "Comma-separated target files (e.g. AGENTS.md,CLAUDE.md)")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var targets []string
+	if *targetsStr != "" {
+		for _, t := range strings.Split(*targetsStr, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				targets = append(targets, t)
+			}
+		}
+	}
+
+	results, err := store.SyncExistingInstructions(targets)
+	if err != nil {
+		return err
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No matching instruction files found to sync (use --targets AGENTS.md to specify).")
+		return nil
+	}
+
+	fmt.Println("=== GitScars Instruction Sync ===")
+	for _, r := range results {
+		fmt.Printf("[%s] %s\n", r.Action, r.FilePath)
 	}
 	return nil
 }

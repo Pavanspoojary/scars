@@ -41,3 +41,10 @@ jobs:
           else
             echo "No go.mod present yet; skipping Go build and test steps."
           fi
+
+      - name: Validate GitScars integrity and freshness
+        run: |
+          go build -o /tmp/git-scars ./cmd/git-scars
+          /tmp/git-scars lint
+          /tmp/git-scars check
+

@@ -129,6 +129,23 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - AI agents can proactively query, inject, and write regression memory directly through standard protocols and zero-dependency CLI pipelines.
   - All operations maintain 100% Go standard library compatibility with zero third-party dependencies.
 
+---
+
+## ADR-0010: Retrieval v2 Partial File Matching Weights
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Exact file matching misses legitimate cases (file moved or renamed). A same-directory fallback was initially assigned +3, which allowed any file in the same directory to pass the abstain threshold alone and caused a regression in `TestInjectGuardrails` (unrelated file in the same directory was retrieved).
+- **Decision**:
+  - Exact path match: +5 (unchanged).
+  - Same basename in a different directory (likely move or rename): +2.
+  - Same directory with a different basename (module proximity): +1.
+  - Partial file signals therefore remain below the abstain threshold (3) unless combined with an additional signal (symbol, error signature, command, dependency, or task terms).
+  - Added normalized symbol matching (exact +4, normalized suffix +2), normalized error-signature matching (+3), and a `confidence = score/19` field in recall output.
+- **Consequences**:
+  - Preserves the frozen evaluation precision requirement (Precision@3 >= 70%, false-positive rate <= 10%) while improving recall for moved or renamed files.
+  - `EVAL_PLAN.md` frozen weights remain valid; partial signals are extensions that cannot independently trigger retrieval.
+
 
 
 

@@ -192,4 +192,9 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"hook", "uninstall"}); err != nil {
 		t.Fatalf("hook uninstall failed: %v", err)
 	}
+
+	// 7. Index rebuild
+	if err := run([]string{"index"}); err != nil {
+		t.Fatalf("index rebuild failed: %v", err)
+	}
 }

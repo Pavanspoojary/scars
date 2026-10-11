@@ -60,6 +60,8 @@ func run(args []string) error {
 		return store.ServeMCP(os.Stdin, os.Stdout)
 	case "hook":
 		return runHook(store, args[1:])
+	case "index":
+		return runIndex(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -86,6 +88,14 @@ Lifecycle Commands:
   promote <id>    Promote a scar to active state (enforces review & verifier invariants)
   reaffirm <id>   Reaffirm a scar after anchor code drift with human rationale
   retire <id>     Retire a scar that is no longer applicable
+  verify <id>     Execute verifier with safety checks and record evidence
+  recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
+  check           Read-only verification of scar freshness and invariants
+  lint            Audit scars for security, wildcards, and schema validity
+  index           Rebuild .gitscars/.local/index.json fast cache
+  hook            Manage Git pre-commit hook (install, uninstall, status)
+  mcp             Run read-only stdio Model Context Protocol (MCP) server
+  feedback <id>   Record feedback on retrieval utility (--rating, --notes)
   version         Print git-scars version
   help            Show this help text
 `, version)
@@ -581,4 +591,13 @@ func runHook(store *scar.Store, args []string) error {
 	default:
 		return fmt.Errorf("unknown hook action %q; expected install, uninstall, or status", action)
 	}
+}
+
+func runIndex(store *scar.Store, args []string) error {
+	idx, err := store.RebuildIndex()
+	if err != nil {
+		return fmt.Errorf("failed rebuilding index: %w", err)
+	}
+	fmt.Printf("Rebuilt local index with %d scars in %s\n", idx.TotalScars, filepath.Join(store.LocalDir, scar.IndexFileName))
+	return nil
 }

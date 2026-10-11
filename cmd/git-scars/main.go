@@ -56,6 +56,8 @@ func run(args []string) error {
 		return runRetire(store, args[1:])
 	case "reaffirm":
 		return runReaffirm(store, args[1:])
+	case "mcp":
+		return store.ServeMCP(os.Stdin, os.Stdout)
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil

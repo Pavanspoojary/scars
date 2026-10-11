@@ -81,10 +81,11 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]string{
 				"name":    "git-scars-mcp",
-				"version": "0.2.0",
+				"version": "1.0.0",
 			},
 			"capabilities": map[string]interface{}{
-				"tools": map[string]interface{}{},
+				"tools":     map[string]interface{}{},
+				"resources": map[string]interface{}{},
 			},
 		}
 		sendRPCResult(out, req.ID, res)
@@ -94,6 +95,69 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 
 	case "ping":
 		sendRPCResult(out, req.ID, map[string]interface{}{})
+
+	case "resources/list":
+		summaries, _ := store.ListScars()
+		resources := []map[string]interface{}{
+			{
+				"uri":         "scars://active",
+				"name":        "Active Repository Scars Table",
+				"description": "Auto-generated markdown table of all active scars and guardrails",
+				"mimeType":    "text/markdown",
+			},
+		}
+		for _, s := range summaries {
+			resources = append(resources, map[string]interface{}{
+				"uri":         fmt.Sprintf("scar://%s", s.Scar.ID),
+				"name":        fmt.Sprintf("Scar: %s", s.Scar.Title),
+				"description": s.Scar.Lesson,
+				"mimeType":    "text/markdown",
+			})
+		}
+		sendRPCResult(out, req.ID, map[string]interface{}{"resources": resources})
+
+	case "resources/read":
+		var rParams struct {
+			URI string `json:"uri"`
+		}
+		if err := json.Unmarshal(req.Params, &rParams); err != nil {
+			sendRPCError(out, req.ID, -32602, "Invalid params")
+			return
+		}
+
+		if rParams.URI == "scars://active" {
+			block, _ := store.GenerateSyncBlock()
+			contents := []map[string]interface{}{
+				{
+					"uri":      rParams.URI,
+					"mimeType": "text/markdown",
+					"text":     block,
+				},
+			}
+			sendRPCResult(out, req.ID, map[string]interface{}{"contents": contents})
+			return
+		}
+
+		if strings.HasPrefix(rParams.URI, "scar://") {
+			id := strings.TrimPrefix(rParams.URI, "scar://")
+			s, _, err := store.LoadScar(id)
+			if err != nil {
+				sendRPCError(out, req.ID, -32602, fmt.Sprintf("Resource not found: %v", err))
+				return
+			}
+			data, _ := FormatFrontmatter(s)
+			contents := []map[string]interface{}{
+				{
+					"uri":      rParams.URI,
+					"mimeType": "text/markdown",
+					"text":     string(data) + "\n\n" + s.Body,
+				},
+			}
+			sendRPCResult(out, req.ID, map[string]interface{}{"contents": contents})
+			return
+		}
+
+		sendRPCError(out, req.ID, -32602, fmt.Sprintf("Unsupported URI scheme %q", rParams.URI))
 
 	case "tools/list":
 		tools := []map[string]interface{}{
@@ -144,6 +208,70 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"description": "High-level description of the coding task being performed",
 						},
 					},
+				},
+			},
+			{
+				"name":        "inject_guardrails",
+				"description": "Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Target file paths being inspected or edited",
+						},
+						"budget_tokens": map[string]interface{}{
+							"type":        "integer",
+							"description": "Maximum estimated tokens to consume (default: 400)",
+						},
+						"format": map[string]interface{}{
+							"type":        "string",
+							"description": "Output format: 'xml' or 'markdown'",
+						},
+					},
+				},
+			},
+			{
+				"name":        "triage_error",
+				"description": "Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"error_output": map[string]interface{}{
+							"type":        "string",
+							"description": "Raw compiler error, test failure log, or panic stack trace",
+						},
+					},
+					"required": []string{"error_output"},
+				},
+			},
+			{
+				"name":        "draft_scar",
+				"description": "Autonomously record a new failure memory draft into repository Git memory",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"title": map[string]interface{}{
+							"type":        "string",
+							"description": "Descriptive title of the failure or regression",
+						},
+						"lesson": map[string]interface{}{
+							"type":        "string",
+							"description": "Actionable prevention rule or architectural guidance",
+						},
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Repository-relative file paths involved in the failure",
+						},
+						"verifier_argv": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Command arguments to verify fix (e.g. ['go', 'test', '-race', './...'])",
+						},
+					},
+					"required": []string{"title", "lesson"},
 				},
 			},
 		}
@@ -271,6 +399,113 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 		jsonData, _ := FormatRecallJSON(opts, matches)
 		return MCPToolResult{
 			Content: []MCPContent{{Type: "text", Text: string(jsonData)}},
+		}
+
+	case "inject_guardrails":
+		var files []string
+		if filesVal, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, f := range filesVal {
+				if str, ok := f.(string); ok && str != "" {
+					files = append(files, str)
+				}
+			}
+		}
+		budget := 400
+		if bVal, ok := params.Arguments["budget_tokens"].(float64); ok && bVal > 0 {
+			budget = int(bVal)
+		}
+		format := "xml"
+		if fVal, ok := params.Arguments["format"].(string); ok && fVal != "" {
+			format = fVal
+		}
+
+		snippet, err := store.InjectGuardrails(InjectOptions{
+			Files:        files,
+			BudgetTokens: budget,
+			Format:       format,
+		})
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Inject failed: %v", err)}},
+			}
+		}
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: snippet}},
+		}
+
+	case "triage_error":
+		errOut, ok := params.Arguments["error_output"].(string)
+		if !ok || errOut == "" {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: "Missing required argument 'error_output'"}},
+			}
+		}
+
+		res, err := store.TriageError(errOut)
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Triage failed: %v", err)}},
+			}
+		}
+
+		data, _ := json.MarshalIndent(res, "", "  ")
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: string(data)}},
+		}
+
+	case "draft_scar":
+		title, ok := params.Arguments["title"].(string)
+		if !ok || title == "" {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: "Missing required argument 'title'"}},
+			}
+		}
+		lesson, ok := params.Arguments["lesson"].(string)
+		if !ok || lesson == "" {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: "Missing required argument 'lesson'"}},
+			}
+		}
+
+		var files []string
+		if filesVal, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, f := range filesVal {
+				if str, ok := f.(string); ok && str != "" {
+					files = append(files, str)
+				}
+			}
+		}
+
+		draft, path, err := store.CreateDraft(title, lesson, files)
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Failed creating draft: %v", err)}},
+			}
+		}
+
+		if verifierVal, ok := params.Arguments["verifier_argv"].([]interface{}); ok {
+			for _, v := range verifierVal {
+				if str, ok := v.(string); ok && str != "" {
+					draft.Verifier.Argv = append(draft.Verifier.Argv, str)
+				}
+			}
+			_, _ = store.SaveScar(draft)
+		}
+
+		res := map[string]string{
+			"status": "draft_created",
+			"id":     draft.ID,
+			"path":   path,
+		}
+		data, _ := json.MarshalIndent(res, "", "  ")
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: string(data)}},
 		}
 
 	default:

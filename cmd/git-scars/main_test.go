@@ -234,4 +234,12 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"add", "-i"}); err != nil {
 		t.Fatalf("interactive add failed: %v", err)
 	}
+
+	// 12. Inject command (XML and Markdown)
+	if err := run([]string{"inject", "--files", "pkg/worker.go", "--budget", "300", "--format", "xml"}); err != nil {
+		t.Fatalf("inject xml failed: %v", err)
+	}
+	if err := run([]string{"inject", "--files", "pkg/worker.go", "--budget", "300", "--format", "markdown"}); err != nil {
+		t.Fatalf("inject markdown failed: %v", err)
+	}
 }

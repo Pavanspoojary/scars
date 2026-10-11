@@ -60,8 +60,8 @@ func TestMCPServerHandshakeAndTools(t *testing.T) {
 	}
 	toolsMap := resp2.Result.(map[string]interface{})
 	tools := toolsMap["tools"].([]interface{})
-	if len(tools) != 3 {
-		t.Errorf("expected 3 tools in tools/list, got %d", len(tools))
+	if len(tools) != 6 {
+		t.Errorf("expected 6 tools in tools/list, got %d", len(tools))
 	}
 
 	// Response 3: recall_scars
@@ -74,5 +74,53 @@ func TestMCPServerHandshakeAndTools(t *testing.T) {
 	text := contents[0].(map[string]interface{})["text"].(string)
 	if !strings.Contains(text, "DNS Resolution Hang") {
 		t.Errorf("expected recall result to contain scar title, got: %s", text)
+	}
+}
+
+func TestMCPServerTwoWayToolsAndResources(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "gitscars-mcp-twoway-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewStore(tmpDir)
+	_ = store.Init()
+
+	// 1. Agent drafts a scar via MCP
+	reqDraft := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"draft_scar","arguments":{"title":"DB Leak","lesson":"Close rows","files":["pkg/db.go"],"verifier_argv":["go","test","./..."]}}}` + "\n"
+	// 2. Read resources list
+	reqResList := `{"jsonrpc":"2.0","id":2,"method":"resources/list","params":{}}` + "\n"
+	// 3. Read active resource
+	reqResRead := `{"jsonrpc":"2.0","id":3,"method":"resources/read","params":{"uri":"scars://active"}}` + "\n"
+	// 4. Inject guardrails tool
+	reqInject := `{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"inject_guardrails","arguments":{"files":["pkg/db.go"],"budget_tokens":300}}}` + "\n"
+
+	in := bytes.NewBufferString(reqDraft + reqResList + reqResRead + reqInject)
+	out := new(bytes.Buffer)
+
+	if err := store.ServeMCP(in, out); err != nil {
+		t.Fatalf("ServeMCP error: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected 4 responses, got %d: %s", len(lines), out.String())
+	}
+
+	// Verify draft creation
+	var respDraft JSONRPCResponse
+	_ = json.Unmarshal([]byte(lines[0]), &respDraft)
+	draftResult := respDraft.Result.(map[string]interface{})
+	draftContent := draftResult["content"].([]interface{})
+	draftText := draftContent[0].(map[string]interface{})["text"].(string)
+	if !strings.Contains(draftText, "draft_created") {
+		t.Errorf("expected draft_created status, got: %s", draftText)
+	}
+
+	// Verify resources list
+	var respResList JSONRPCResponse
+	_ = json.Unmarshal([]byte(lines[1]), &respResList)
+	resMap := respResList.Result.(map[string]interface{})
+	resources := resMap["resources"].([]interface{})
+	if len(resources) < 2 {
+		t.Errorf("expected at least 2 resources, got %d", len(resources))
 	}
 }

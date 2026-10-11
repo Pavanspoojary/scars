@@ -307,10 +307,19 @@ GitScars provides a built-in stdio Model Context Protocol (MCP) server for nativ
 git-scars mcp
 ```
 
-The MCP server exposes three read-only tools:
+The MCP server exposes rich two-way tools and resources for AI coding agents:
+
+#### Tools:
 - `list_scars`: List all repository scars with their lifecycle and dynamic freshness status.
 - `get_scar`: Retrieve full frontmatter, anchors, verifier results, and markdown body by scar ID.
 - `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, and commands.
+- `inject_guardrails`: Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files.
+- `triage_error`: Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars.
+- `draft_scar`: Autonomously record a new failure memory draft into repository Git memory.
+
+#### Resources:
+- `scar://<id>`: Read individual scar frontmatter and prevention lessons directly as MCP resources.
+- `scars://active`: Read the auto-generated markdown summary table of active repository guardrails.
 
 #### Client Configuration
 

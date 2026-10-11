@@ -85,6 +85,7 @@ type Verifier struct {
 // Baseline records anchor file hashes at time of verification/reaffirmation.
 type Baseline struct {
 	AnchorHashes map[string]string `json:"anchor_hashes,omitempty"`
+	SymbolHashes map[string]string `json:"symbol_hashes,omitempty"`
 	RecordedAt   string            `json:"recorded_at,omitempty"`
 	CommandHash  string            `json:"command_hash,omitempty"`
 }

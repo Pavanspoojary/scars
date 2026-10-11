@@ -71,3 +71,52 @@ func TestPartialFileSignalAbstainsAlone(t *testing.T) {
 		t.Errorf("expected same-dir partial signal to abstain (score < 3), got %d", scored.Score)
 	}
 }
+
+func TestRecallIndexCacheFastPath(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+	if err := store.Init(); err != nil {
+		t.Fatalf("failed initializing store: %v", err)
+	}
+
+	// Create a test scar
+	scar := &Scar{
+		SchemaVersion: CurrentSchemaVersion,
+		ID:            "scar-cache-test",
+		Title:         "Cache test scar",
+		Lesson:        "Index fast-path must retrieve active scars properly",
+		Lifecycle:     Lifecycle{State: LifecycleActive},
+		Review:        Review{Status: ReviewApproved},
+		Anchors: Anchors{
+			Files: []string{"pkg/cache.go"},
+		},
+		Verifier: Verifier{Argv: []string{"go", "test", "./..."}, Result: VerificationFailToPass},
+	}
+	if _, err := store.SaveScar(scar); err != nil {
+		t.Fatalf("failed saving scar: %v", err)
+	}
+
+	// Rebuild index
+	idx, err := store.RebuildIndex()
+	if err != nil {
+		t.Fatalf("failed rebuilding index: %v", err)
+	}
+	if !store.IsIndexFresh(idx) {
+		t.Fatalf("expected index to be fresh after rebuild")
+	}
+
+	// Recall via fast path
+	res, err := store.Recall(QueryOptions{
+		Files:        []string{"pkg/cache.go"},
+		IncludeStale: true,
+	})
+	if err != nil {
+		t.Fatalf("recall failed: %v", err)
+	}
+	if len(res) == 0 {
+		t.Fatalf("expected at least 1 match from index fast-path, got 0")
+	}
+	if res[0].Scar.ID != "scar-cache-test" {
+		t.Errorf("expected match ID 'scar-cache-test', got %s", res[0].Scar.ID)
+	}
+}

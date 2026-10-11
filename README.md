@@ -370,6 +370,7 @@ Output:
       "title": "Concurrent map write in telemetry exporter",
       "lesson": "Metrics map must be protected by sync.RWMutex during RecordMetric calls.",
       "score": 5,
+      "confidence": 0.26,
       "freshness": "current",
       "matches": ["file(+5)"],
       "explanation": "file(+5)",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -47,7 +48,7 @@ func (s *Store) RebuildIndex() (*IndexCache, error) {
 
 	index := &IndexCache{
 		SchemaVersion: "reposcars.index.v1",
-		UpdatedAt:     time.Now().UTC().Format(time.RFC3339),
+		UpdatedAt:     time.Now().UTC().Format(time.RFC3339Nano),
 		TotalScars:    len(summaries),
 		Scars:         make([]IndexEntry, 0, len(summaries)),
 	}
@@ -98,4 +99,41 @@ func (s *Store) LoadIndex() (*IndexCache, error) {
 	}
 
 	return &index, nil
+}
+
+// IsIndexFresh verifies that index.json is newer than all .md scar files in ScarsDir
+// and that total count matches. Returns false if any file is newer or count differs.
+func (s *Store) IsIndexFresh(idx *IndexCache) bool {
+	if idx == nil {
+		return false
+	}
+	updatedAt, err := time.Parse(time.RFC3339Nano, idx.UpdatedAt)
+	if err != nil {
+		updatedAt, err = time.Parse(time.RFC3339, idx.UpdatedAt)
+		if err != nil {
+			return false
+		}
+	}
+
+	entries, err := os.ReadDir(s.ScarsDir)
+	if err != nil {
+		return false
+	}
+
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		count++
+		info, err := e.Info()
+		if err != nil {
+			return false
+		}
+		if info.ModTime().After(updatedAt) {
+			return false
+		}
+	}
+
+	return count == idx.TotalScars
 }

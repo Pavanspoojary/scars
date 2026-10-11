@@ -328,30 +328,70 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 		q.InstalledDependencies = GetRepoDependencies(s.RepoRoot)
 	}
 
-	scars, err := s.ListScars()
-	if err != nil {
-		return nil, err
-	}
-
 	var candidates []ScoredScar
-	for _, summary := range scars {
-		scar := summary.Scar
 
-		// Only active scars are retrieved in normal recall
-		if scar.Lifecycle.State != LifecycleActive {
-			continue
+	// Fast-path: score candidates directly from in-memory index cache if fresh
+	idx, idxErr := s.LoadIndex()
+	if idxErr == nil && s.IsIndexFresh(idx) {
+		for _, entry := range idx.Scars {
+			if entry.Lifecycle != LifecycleActive {
+				continue
+			}
+			scarStub := &Scar{
+				ID:        entry.ID,
+				Title:     entry.Title,
+				Lesson:    entry.Lesson,
+				Lifecycle: Lifecycle{State: entry.Lifecycle},
+				Review:    Review{Status: entry.ReviewStatus},
+				Anchors: Anchors{
+					Files:           entry.Files,
+					Symbols:         entry.Symbols,
+					Commands:        entry.Commands,
+					ErrorSignatures: entry.ErrorSignatures,
+					Dependencies:    entry.Dependencies,
+				},
+			}
+			scored := ScoreScarItem(scarStub, q)
+			if scored.Score >= threshold {
+				fullScar, _, err := s.LoadScar(entry.ID)
+				if err != nil {
+					continue
+				}
+				freshness := s.ComputeFreshness(fullScar)
+				if freshness != FreshnessCurrent && !q.IncludeStale {
+					continue
+				}
+				scored.Scar = fullScar
+				scored.Freshness = freshness
+				candidates = append(candidates, scored)
+			}
+		}
+	} else {
+		// Fallback path: full disk scan and baseline calculation across all scars
+		scars, err := s.ListScars()
+		if err != nil {
+			return nil, err
 		}
 
-		// Freshness rule: exclude changed or unavailable scars unless --include-stale
-		if summary.Freshness != FreshnessCurrent && !q.IncludeStale {
-			continue
-		}
+		for _, summary := range scars {
+			scar := summary.Scar
 
-		scored := ScoreScarItem(scar, q)
-		scored.Freshness = summary.Freshness
+			// Only active scars are retrieved in normal recall
+			if scar.Lifecycle.State != LifecycleActive {
+				continue
+			}
 
-		if scored.Score >= threshold {
-			candidates = append(candidates, scored)
+			// Freshness rule: exclude changed or unavailable scars unless --include-stale
+			if summary.Freshness != FreshnessCurrent && !q.IncludeStale {
+				continue
+			}
+
+			scored := ScoreScarItem(scar, q)
+			scored.Freshness = summary.Freshness
+
+			if scored.Score >= threshold {
+				candidates = append(candidates, scored)
+			}
 		}
 	}
 

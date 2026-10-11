@@ -98,5 +98,21 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Provides instant, zero-dependency visibility into repository regression guardrail coverage.
   - Generates structured JSON output for CI reporting and agent telemetry.
 
+---
+
+## ADR-0008: Repository Health Diagnostics (`git-scars doctor`) and Interactive Capture Wizard
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Users, CI pipelines, and autonomous coding agents require a fast, unified health check to diagnose Git environment readiness, directory structures, schema validity, lifecycle invariants, anchor freshness drift, pre-commit hook installations, verifier trust lists, and index cache integrity without running multiple disparate commands. Additionally, manual scar drafting needed a zero-friction interactive terminal mode (`git-scars add -i`) alongside commit-based drafting.
+- **Decision**:
+  - Implement `git-scars doctor` (`--json`) executing 8 distinct diagnostic probes across Git worktree, store structure, schemas/lint, invariants, drift, hooks, trust store, and index cache.
+  - Implement interactive wizard mode for `git-scars add -i` using standard library `bufio.Scanner` prompts for title, lesson, and anchor files.
+- **Consequences**:
+  - Provides a single point of validation for developers and automated workflows.
+  - Delivers actionable remediation messages for each warning (e.g. instructing exact commands for hook installation or reaffirmation).
+  - Preserves pure Go standard library design with zero external dependencies.
+
+
 
 

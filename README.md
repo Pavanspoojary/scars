@@ -20,6 +20,11 @@ When developers edit code or coding agents (Claude Code, Cursor, Antigravity, Wi
 - [How It Works](#how-it-works)
 - [Installation & Build](#installation--build)
 - [Quickstart Workflow](#quickstart-workflow)
+  - [Automated Regression Harvesting (`harvest`)](#16-automated-historical-regression-mining-git-scars-harvest)
+  - [Portable Memory Bundles (`bundle`)](#17-portable-memory-bundles-git-scars-bundle)
+  - [Self-Healing Execution Loop (`heal`)](#18-self-healing-execution-loop-git-scars-heal)
+  - [CI/CD & SARIF Annotations (`check --format sarif`)](#19-cicd--github-code-scanning-sarif-git-scars-check---format-sarif)
+  - [AST-Aware Fine-Grained Freshness](#20-ast-aware-fine-grained-freshness)
 - [File Format & Schema](#file-format--schema)
 - [AI Agent Integration & MCP Server](#ai-agent-integration--mcp-server)
 - [Dependency Manifest & Lockfile Anchors](#dependency-manifest--lockfile-anchors)
@@ -274,6 +279,61 @@ git-scars dedupe --dry-run
 git-scars dedupe --min 0.75 --json
 ```
 
+### 16. Automated Historical Regression Mining (`git-scars harvest`)
+Bootstrap repository memory instantly by walking Git history to identify past bug-fixing commits and generating draft scars:
+```bash
+# Preview candidate bug fixes in recent commit history (dry run)
+git-scars harvest --max 50 --dry-run
+
+# Automatically generate draft scars for review and promotion
+git-scars harvest --max 100
+
+# Inspect findings as structured JSON
+git-scars harvest --json
+```
+
+### 17. Portable Memory Bundles (`git-scars bundle`)
+Share, export, and import curated sets of verified failure memories across teams and services without sharing entire Git histories:
+```bash
+# Export active scars into a portable verified JSON memory bundle
+git-scars bundle export --out ./shared-scars.json
+
+# Export with severity filtering
+git-scars bundle export --severity critical --out ./critical-scars.json
+
+# Import memory bundle into repository as reviewable drafts (with optional ID prefix)
+git-scars bundle import ./shared-scars.json --prefix org-
+```
+*Note: All imported scars are ingested as unreviewed drafts (`status: unreviewed`) to guarantee local verifier execution and team code review before activation.*
+
+### 18. Self-Healing Execution Loop (`git-scars heal`)
+Run test suites or build commands under automated surveillance. When failures occur, `heal` intercepts output, matches relevant regression scars, and generates structured remediation guidance:
+```bash
+# Run tests under self-healing observation
+git-scars heal -- go test -race ./...
+
+# Machine-readable output for autonomous agent loops
+git-scars heal --json -- npm test
+```
+
+### 19. CI/CD & GitHub Code Scanning SARIF (`git-scars check --format sarif`)
+Integrate GitScars directly into pull request checks and security dashboards using the OASIS SARIF 2.1.0 standard:
+```bash
+# Scaffold production-ready GitHub Actions workflow (.github/workflows/git-scars.yml)
+git-scars init --ci github
+
+# Emit SARIF report for GitHub Code Scanning annotations
+git-scars check --format sarif > git-scars.sarif
+
+# Pre-edit enforcement blocking check in SARIF format
+git-scars enforce --files "pkg/auth.go" --format sarif
+```
+
+### 20. AST-Aware Fine-Grained Freshness
+GitScars includes built-in AST symbol hashing for Go (`go/parser`, `go/ast`). When anchor source files are modified:
+- If anchored functions, types, or methods remain syntactically identical (e.g. comments, whitespace, or unrelated helper functions changed), freshness remains **`current`**.
+- If anchored symbol declarations are altered or removed, freshness transitions to **`changed`** (stale), signaling the need for review and reaffirmation.
+
 ---
 
 ## File Format & Schema
@@ -463,7 +523,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
-| `init` | `[--agent <targets>]` | Initialize `.gitscars/` repository and optional agent configs (`claude,cursor,...`) |
+| `init` | `[--agent <targets>, --ci <target>]` | Initialize `.gitscars/` repository, agent configs, and CI workflows (`--ci github`) |
 | `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
@@ -476,12 +536,15 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
-| `enforce` | `--files`, `[--fail-on, --staged, --json]` | Pre-edit blocking guardrail check (exit `0` clean, exit `2` blocked) |
+| `enforce` | `--files`, `[--fail-on, --format, --staged, --json]` | Pre-edit blocking guardrail check (`--format sarif`, exit `0` clean, exit `2` blocked) |
 | `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
 | `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
 | `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
-| `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
+| `harvest` | `[--max <n>, --since <ref>, --dry-run, --json]` | Automatically mine bug-fixing commits from Git history into scar drafts |
+| `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
+| `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
+| `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
 | `lint` | none | Security and schema audit (checks traversal, injections, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
@@ -507,7 +570,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0010).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0012).
 
 ---
 

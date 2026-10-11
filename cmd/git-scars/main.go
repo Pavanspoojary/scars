@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -67,6 +68,8 @@ func run(args []string) error {
 		return runDiff(store, args[1:])
 	case "stats":
 		return runStats(store, args[1:])
+	case "doctor":
+		return runDoctor(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -87,7 +90,7 @@ Usage:
 
 Lifecycle Commands:
   init            Initialize .gitscars/ repository metadata and config
-  add             Create a new scar draft (manual or --title/--lesson/--files)
+  add             Create a new scar draft (interactive -i or --title/--lesson/--files)
   list            List recorded scars with lifecycle, review, and dynamic freshness
   show <id>       Display full metadata and lesson for a scar
   diff <id>       Show diff between anchor files and recorded baseline
@@ -98,6 +101,7 @@ Lifecycle Commands:
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
+  doctor          Run repository diagnostics and health checks (--json)
   stats           Display repository metrics and feedback statistics (--json)
   index           Rebuild .gitscars/.local/index.json fast cache
   hook            Manage Git pre-commit hook (install, uninstall, status)
@@ -158,13 +162,36 @@ func runAdd(store *scar.Store, args []string) error {
 	title := fs.String("title", "", "Descriptive failure title")
 	lesson := fs.String("lesson", "", "Concise prevention lesson")
 	filesStr := fs.String("files", "", "Comma-separated list of anchored files")
+	interactive := fs.Bool("interactive", false, "Interactive prompt mode")
+	fs.BoolVar(interactive, "i", false, "Interactive prompt mode (shorthand)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
+	if *interactive {
+		scanner := bufio.NewScanner(os.Stdin)
+		fmt.Print("Scar Title: ")
+		if scanner.Scan() {
+			*title = strings.TrimSpace(scanner.Text())
+		}
+		if *title == "" {
+			return fmt.Errorf("title cannot be empty")
+		}
+
+		fmt.Print("Prevention Lesson: ")
+		if scanner.Scan() {
+			*lesson = strings.TrimSpace(scanner.Text())
+		}
+
+		fmt.Print("Anchored Files (comma-separated, optional): ")
+		if scanner.Scan() {
+			*filesStr = strings.TrimSpace(scanner.Text())
+		}
+	}
+
 	if *title == "" {
-		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\") or add from-commit <sha>")
+		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\"), interactive mode (-i), or add from-commit <sha>")
 	}
 
 	var files []string
@@ -688,4 +715,47 @@ func runStats(store *scar.Store, args []string) error {
 	}
 
 	return nil
+}
+
+func runDoctor(store *scar.Store, args []string) error {
+	report := store.RunDoctor()
+
+	for _, a := range args {
+		if a == "--json" {
+			data, err := json.MarshalIndent(report, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(data))
+			if !report.Healthy {
+				return fmt.Errorf("doctor detected %d diagnostic failure(s)", report.Errors)
+			}
+			return nil
+		}
+	}
+
+	fmt.Println("=== GitScars System Diagnostics ===")
+	for _, c := range report.Checks {
+		symbol := "✓"
+		switch c.Status {
+		case "OK":
+			symbol = "✓"
+		case "WARN":
+			symbol = "!"
+		case "FAIL":
+			symbol = "✗"
+		}
+		fmt.Printf("[%s] %-22s %s\n", symbol, c.Name+":", c.Message)
+		for _, d := range c.Details {
+			fmt.Printf("      - %s\n", d)
+		}
+	}
+
+	fmt.Println()
+	if report.Healthy {
+		fmt.Printf("Diagnostics complete: %d errors, %d warnings (Healthy)\n", report.Errors, report.Warnings)
+		return nil
+	}
+
+	return fmt.Errorf("diagnostics failed: %d errors, %d warnings", report.Errors, report.Warnings)
 }

@@ -438,7 +438,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0008).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0009).
 
 ---
 

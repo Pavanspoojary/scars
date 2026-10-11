@@ -113,6 +113,23 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Delivers actionable remediation messages for each warning (e.g. instructing exact commands for hook installation or reaffirmation).
   - Preserves pure Go standard library design with zero external dependencies.
 
+---
+
+## ADR-0009: Autonomous Agent Integration (Token-Budget Injection, Instruction Sync, Two-Way MCP, and Error Triage)
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: AI coding assistants (Claude Code, Cursor, Copilot, Antigravity) are constrained by token budget ceilings and attention dilution when ingesting full repository instruction files. Agents also lack automated error correlation during test failures and require two-way memory tools to autonomously record regressions without human friction.
+- **Decision**:
+  - Implement `git-scars inject` with conservative rune-to-token budgeting (~4 chars/token) outputting compact XML/Markdown prompt guardrails.
+  - Implement `git-scars sync` maintaining auto-generated guardrail blocks inside `AGENTS.md` / `CLAUDE.md` between `<!-- GIT-SCARS:START -->` and `<!-- GIT-SCARS:END -->` markers.
+  - Implement `git-scars triage` extracting panic traces and failure signatures from stdin or flags to yield immediate prevention lessons.
+  - Expand the stdio JSON-RPC 2.0 MCP server with two-way tools (`inject_guardrails`, `triage_error`, `draft_scar`) and MCP markdown resources (`scar://<id>`, `scars://active`).
+- **Consequences**:
+  - AI agents can proactively query, inject, and write regression memory directly through standard protocols and zero-dependency CLI pipelines.
+  - All operations maintain 100% Go standard library compatibility with zero third-party dependencies.
+
+
 
 
 

@@ -1,0 +1,291 @@
+package scar
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// Store manages loading, creating, and updating Scar records on disk.
+type Store struct {
+	RepoRoot string
+	ScarsDir string
+	LocalDir string
+}
+
+// NewStore initializes a Store rooted at the repository directory.
+func NewStore(repoRoot string) *Store {
+	return &Store{
+		RepoRoot: repoRoot,
+		ScarsDir: filepath.Join(repoRoot, DefaultStoreDir, ScarsDirName),
+		LocalDir: filepath.Join(repoRoot, DefaultStoreDir, LocalDirName),
+	}
+}
+
+// Init initializes the .gitscars directory structure and config.
+func (s *Store) Init() error {
+	if err := os.MkdirAll(s.ScarsDir, 0755); err != nil {
+		return fmt.Errorf("failed creating scars directory: %w", err)
+	}
+	if err := os.MkdirAll(s.LocalDir, 0755); err != nil {
+		return fmt.Errorf("failed creating local state directory: %w", err)
+	}
+
+	// Ensure .local is gitignored
+	gitignorePath := filepath.Join(s.RepoRoot, DefaultStoreDir, ".gitignore")
+	if _, err := os.Stat(gitignorePath); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignorePath, []byte(".local/\n"), 0644); err != nil {
+			return fmt.Errorf("failed writing .gitscars/.gitignore: %w", err)
+		}
+	}
+
+	// Write default config.yaml if missing
+	configPath := filepath.Join(s.RepoRoot, DefaultStoreDir, "config.yaml")
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		defaultConfig := `# GitScars Configuration
+schema_version: "1"
+abstain_threshold: 3
+top_k: 3
+`
+		if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
+			return fmt.Errorf("failed writing config.yaml: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// CreateDraft creates a new draft Scar file on disk and returns the Scar.
+func (s *Store) CreateDraft(title, lesson string, files []string) (*Scar, string, error) {
+	slug := Slugify(title)
+	draft, err := NewDraft(slug, title, lesson, files)
+	if err != nil {
+		return nil, "", err
+	}
+
+	filename := fmt.Sprintf("%s.md", draft.ID)
+	targetPath := filepath.Join(s.ScarsDir, filename)
+
+	data, err := FormatFrontmatter(draft)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed formatting frontmatter: %w", err)
+	}
+
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		return nil, "", fmt.Errorf("failed writing scar file: %w", err)
+	}
+
+	return draft, targetPath, nil
+}
+
+// LoadScar loads a single Scar by ID or filename.
+func (s *Store) LoadScar(idOrFile string) (*Scar, string, error) {
+	var targetPath string
+	if strings.HasSuffix(idOrFile, ".md") {
+		targetPath = filepath.Join(s.ScarsDir, idOrFile)
+		if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+			targetPath = idOrFile // try direct path
+		}
+	} else {
+		targetPath = filepath.Join(s.ScarsDir, idOrFile+".md")
+	}
+
+	data, err := os.ReadFile(targetPath)
+	if err != nil {
+		// Try scanning directory for partial ID match
+		matchedPath, findErr := s.findByID(idOrFile)
+		if findErr != nil {
+			return nil, "", fmt.Errorf("scar %q not found: %w", idOrFile, err)
+		}
+		targetPath = matchedPath
+		data, err = os.ReadFile(targetPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed reading scar at %s: %w", targetPath, err)
+		}
+	}
+
+	scar, err := ParseFrontmatter(data)
+	if err != nil {
+		return nil, targetPath, fmt.Errorf("failed parsing scar %s: %w", targetPath, err)
+	}
+
+	return scar, targetPath, nil
+}
+
+func (s *Store) findByID(id string) (string, error) {
+	entries, err := os.ReadDir(s.ScarsDir)
+	if err != nil {
+		return "", err
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+			name := strings.TrimSuffix(e.Name(), ".md")
+			if name == id || strings.HasSuffix(name, "-"+id) {
+				return filepath.Join(s.ScarsDir, e.Name()), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("scar ID %q not found in %s", id, s.ScarsDir)
+}
+
+// SaveScar writes an updated Scar back to disk.
+func (s *Store) SaveScar(scar *Scar) (string, error) {
+	if err := scar.ValidateInvariants(); err != nil {
+		return "", fmt.Errorf("cannot save scar with invalid invariants: %w", err)
+	}
+
+	filename := fmt.Sprintf("%s.md", scar.ID)
+	targetPath := filepath.Join(s.ScarsDir, filename)
+
+	data, err := FormatFrontmatter(scar)
+	if err != nil {
+		return "", fmt.Errorf("failed formatting scar: %w", err)
+	}
+
+	if err := os.WriteFile(targetPath, data, 0644); err != nil {
+		return "", fmt.Errorf("failed writing scar to %s: %w", targetPath, err)
+	}
+
+	return targetPath, nil
+}
+
+// ListScars returns all loaded scars and their current dynamic freshness.
+type ScarSummary struct {
+	Scar      *Scar
+	FilePath  string
+	Freshness string
+}
+
+func (s *Store) ListScars() ([]ScarSummary, error) {
+	if _, err := os.Stat(s.ScarsDir); os.IsNotExist(err) {
+		return nil, nil
+	}
+
+	entries, err := os.ReadDir(s.ScarsDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed reading scars directory: %w", err)
+	}
+
+	var results []ScarSummary
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(s.ScarsDir, e.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		scar, err := ParseFrontmatter(data)
+		if err != nil {
+			continue
+		}
+
+		freshness := s.ComputeFreshness(scar)
+		results = append(results, ScarSummary{
+			Scar:      scar,
+			FilePath:  path,
+			Freshness: freshness,
+		})
+	}
+
+	// Sort stably by ID
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Scar.ID < results[j].Scar.ID
+	})
+
+	return results, nil
+}
+
+// ComputeFreshness dynamically compares current file hashes to recorded baseline hashes.
+// This is strictly READ-ONLY and does not mutate any file.
+func (s *Store) ComputeFreshness(scar *Scar) string {
+	if len(scar.Baseline.AnchorHashes) == 0 {
+		return FreshnessUnavailable
+	}
+
+	for relPath, expectedHash := range scar.Baseline.AnchorHashes {
+		fullPath := filepath.Join(s.RepoRoot, relPath)
+		currentHash, err := hashFile(fullPath)
+		if err != nil {
+			return FreshnessUnavailable
+		}
+		if currentHash != expectedHash {
+			return FreshnessChanged
+		}
+	}
+
+	return FreshnessCurrent
+}
+
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, f); err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(hasher.Sum(nil)), nil
+}
+
+// RecordBaseline calculates current hashes of anchor files and updates the scar's baseline.
+func (s *Store) RecordBaseline(scar *Scar, commandHash string) error {
+	if scar.Baseline.AnchorHashes == nil {
+		scar.Baseline.AnchorHashes = make(map[string]string)
+	}
+
+	for _, f := range scar.Anchors.Files {
+		fullPath := filepath.Join(s.RepoRoot, f)
+		h, err := hashFile(fullPath)
+		if err == nil {
+			scar.Baseline.AnchorHashes[f] = h
+		}
+	}
+
+	if commandHash != "" {
+		scar.Baseline.CommandHash = commandHash
+	}
+
+	return nil
+}
+
+// Reaffirm updates a scar's anchor baseline with explicit human reviewer rationale.
+func (s *Store) Reaffirm(id, reviewer, rationale string) (*Scar, error) {
+	if strings.TrimSpace(reviewer) == "" {
+		return nil, errors.New("reaffirmation requires an explicit reviewer name")
+	}
+	if strings.TrimSpace(rationale) == "" {
+		return nil, errors.New("reaffirmation requires a documented rationale")
+	}
+
+	scar, _, err := s.LoadScar(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.RecordBaseline(scar, scar.Verifier.CommandHash); err != nil {
+		return nil, fmt.Errorf("failed recording baseline: %w", err)
+	}
+
+	scar.Review.Reviewer = reviewer
+	scar.Review.Rationale = fmt.Sprintf("Reaffirmed: %s", rationale)
+
+	if _, err := s.SaveScar(scar); err != nil {
+		return nil, err
+	}
+
+	return scar, nil
+}

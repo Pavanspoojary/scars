@@ -1,20 +1,17 @@
 package main
 
 import (
-	"bytes"
-	"context"
 	"flag"
 	"fmt"
-	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
-	"time"
+
+	"github.com/Pavanspoojary/si-scars/pkg/scar"
 )
 
-const version = "0.1.0-spike"
+const version = "0.2.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -30,16 +27,23 @@ func run(args []string) error {
 	}
 
 	repoRoot := findRepoRoot()
+	store := scar.NewStore(repoRoot)
 
 	switch args[0] {
 	case "init":
-		return runInit(repoRoot)
+		return runInit(store)
 	case "add":
-		return runAdd(repoRoot, args[1:])
+		return runAdd(store, args[1:])
 	case "list":
-		return runList(repoRoot, args[1:])
-	case "verify":
-		return runVerify(repoRoot, args[1:])
+		return runList(store, args[1:])
+	case "show":
+		return runShow(store, args[1:])
+	case "promote":
+		return runPromote(store, args[1:])
+	case "retire":
+		return runRetire(store, args[1:])
+	case "reaffirm":
+		return runReaffirm(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -53,16 +57,19 @@ func run(args []string) error {
 }
 
 func printUsage() {
-	fmt.Printf(`GitScars CLI (%s) - Failure-mode memory and regression guardrails for coding agents
+	fmt.Printf(`git-scars (%s) - Git-friendly failure memory and regression guardrails
 
 Usage:
   git-scars <command> [arguments]
 
-Commands:
+Lifecycle Commands:
   init            Initialize .gitscars/ repository metadata and config
-  add             Add a new scar with frontmatter and body
-  list            List recorded scars with anchors, status, and drift
-  verify          Execute verifier command(s) against current tree
+  add             Create a new scar draft (manual or --title/--lesson/--files)
+  list            List recorded scars with lifecycle, review, and dynamic freshness
+  show <id>       Display full metadata and lesson for a scar
+  promote <id>    Promote a scar to active state (enforces review & verifier invariants)
+  reaffirm <id>   Reaffirm a scar after anchor code drift with human rationale
+  retire <id>     Retire a scar that is no longer applicable
   version         Print git-scars version
   help            Show this help text
 `, version)
@@ -75,7 +82,7 @@ func findRepoRoot() string {
 	}
 	curr := dir
 	for {
-		if _, err := os.Stat(filepath.Join(curr, ".gitscars")); err == nil {
+		if _, err := os.Stat(filepath.Join(curr, scar.DefaultStoreDir)); err == nil {
 			return curr
 		}
 		if _, err := os.Stat(filepath.Join(curr, ".git")); err == nil {
@@ -90,271 +97,189 @@ func findRepoRoot() string {
 	return dir
 }
 
-func runInit(root string) error {
-	scarsDir := filepath.Join(root, ".gitscars", "scars")
-	if err := os.MkdirAll(scarsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
+func runInit(store *scar.Store) error {
+	if err := store.Init(); err != nil {
+		return fmt.Errorf("initialization failed: %w", err)
 	}
-
-	configFile := filepath.Join(root, ".gitscars", "config.yaml")
-	if _, err := os.Stat(configFile); os.IsNotExist(err) {
-		content := `# GitScars configuration
-version: 1
-scars_dir: scars
-abstention_threshold: 0.7
-`
-		if err := os.WriteFile(configFile, []byte(content), 0644); err != nil {
-			return fmt.Errorf("failed to write config.yaml: %w", err)
-		}
-		fmt.Printf("Initialized GitScars repository at %s\n", filepath.Join(root, ".gitscars"))
-	} else {
-		fmt.Printf("GitScars already initialized at %s\n", filepath.Join(root, ".gitscars"))
-	}
+	fmt.Printf("Initialized GitScars in %s/.gitscars\n", store.RepoRoot)
 	return nil
 }
 
-func runAdd(root string, args []string) error {
+func runAdd(store *scar.Store, args []string) error {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	idFlag := fs.String("id", "", "Scar ID (e.g. scar-001)")
-	titleFlag := fs.String("title", "", "Short title or summary")
-	pathFlag := fs.String("path", "", "Anchored file path relative to repo root")
-	symbolFlag := fs.String("symbol", "", "Anchored symbol or function name")
-	commitFlag := fs.String("commit", "", "Git commit hash of anchor")
-	verifierFlag := fs.String("verifier", "", "Verifier shell command (reproducer/regression test)")
-	bodyFlag := fs.String("body", "", "Markdown body details")
+	title := fs.String("title", "", "Descriptive failure title")
+	lesson := fs.String("lesson", "", "Concise prevention lesson")
+	filesStr := fs.String("files", "", "Comma-separated list of anchored files")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 
-	if *titleFlag == "" {
-		return fmt.Errorf("flag -title is required")
+	if *title == "" {
+		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\")")
 	}
 
-	scarsDir := filepath.Join(root, ".gitscars", "scars")
-	if err := os.MkdirAll(scarsDir, 0755); err != nil {
-		return fmt.Errorf("failed to create scars directory: %w", err)
-	}
-
-	id := *idFlag
-	if id == "" {
-		entries, _ := os.ReadDir(scarsDir)
-		count := 0
-		for _, e := range entries {
-			if strings.HasSuffix(e.Name(), ".md") {
-				count++
+	var files []string
+	if *filesStr != "" {
+		for _, f := range strings.Split(*filesStr, ",") {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				files = append(files, f)
 			}
 		}
-		id = fmt.Sprintf("scar-%03d", count+1)
 	}
 
-	commit := *commitFlag
-	if commit == "" && *pathFlag != "" {
-		cmd := exec.Command("git", "rev-parse", "--short", "HEAD")
-		cmd.Dir = root
-		if out, err := cmd.Output(); err == nil {
-			commit = strings.TrimSpace(string(out))
-		}
+	draft, path, err := store.CreateDraft(*title, *lesson, files)
+	if err != nil {
+		return fmt.Errorf("failed creating draft: %w", err)
 	}
 
-	scar := &Scar{
-		ID:      id,
-		Title:   *titleFlag,
-		Created: time.Now().UTC().Format(time.RFC3339),
-		Status:  "active",
-		Verifier: Verifier{
-			Command:  *verifierFlag,
-			Expected: "pass",
-		},
-	}
-
-	if *pathFlag != "" {
-		scar.Anchors = append(scar.Anchors, Anchor{
-			Path:   *pathFlag,
-			Symbol: *symbolFlag,
-			Commit: commit,
-		})
-	}
-
-	if *bodyFlag != "" {
-		scar.Body = *bodyFlag
-	} else {
-		stat, _ := os.Stdin.Stat()
-		if stat != nil && (stat.Mode()&os.ModeCharDevice) == 0 {
-			b, _ := io.ReadAll(os.Stdin)
-			scar.Body = string(b)
-		} else {
-			scar.Body = `### Symptom & Root Cause
-Describe how this failure manifested and what underlying condition caused it.
-
-### Footgun / Guardrail
-Describe rules or architectural guardrails to prevent regression.`
-		}
-	}
-
-	targetPath := filepath.Join(scarsDir, id+".md")
-	content := FormatScar(scar)
-	if err := os.WriteFile(targetPath, []byte(content), 0644); err != nil {
-		return fmt.Errorf("failed to write scar file: %w", err)
-	}
-
-	fmt.Printf("Created scar %s at %s\n", id, filepath.Join(".gitscars", "scars", id+".md"))
+	fmt.Printf("Created draft scar: %s\nPath: %s\nStatus: %s (review: %s, verifier: %s)\n",
+		draft.ID, path, draft.Lifecycle.State, draft.Review.Status, draft.Verifier.Result)
 	return nil
 }
 
-func runList(root string, args []string) error {
-	scarsDir := filepath.Join(root, ".gitscars", "scars")
-	entries, err := os.ReadDir(scarsDir)
+func runList(store *scar.Store, args []string) error {
+	scars, err := store.ListScars()
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Println("No scars found. Run 'git-scars init' and 'git-scars add'.")
-			return nil
-		}
-		return fmt.Errorf("failed to read scars directory: %w", err)
-	}
-
-	var scars []*Scar
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(scarsDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		s, err := ParseScar(data)
-		if err != nil {
-			continue
-		}
-		scars = append(scars, s)
+		return fmt.Errorf("failed listing scars: %w", err)
 	}
 
 	if len(scars) == 0 {
-		fmt.Println("No scars found in .gitscars/scars/")
+		fmt.Println("No scars found in .gitscars/scars. Run 'git-scars add' to record a lesson.")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tANCHOR\tVERIFIER\tTITLE")
-	for _, s := range scars {
-		status := s.Status
-		if drifted, reason := CheckDrift(root, s); drifted {
-			status = fmt.Sprintf("drifted (%s)", reason)
+	fmt.Fprintln(w, "ID\tTITLE\tSTATE\tREVIEW\tVERIFIER\tFRESHNESS")
+	for _, item := range scars {
+		s := item.Scar
+		title := s.Title
+		if len(title) > 40 {
+			title = title[:37] + "..."
 		}
-
-		anchorStr := "-"
-		if len(s.Anchors) > 0 {
-			a := s.Anchors[0]
-			if a.Symbol != "" {
-				anchorStr = fmt.Sprintf("%s:%s", a.Path, a.Symbol)
-			} else {
-				anchorStr = a.Path
-			}
-			if len(s.Anchors) > 1 {
-				anchorStr += fmt.Sprintf(" (+%d more)", len(s.Anchors)-1)
-			}
-		}
-
-		verStr := "-"
-		if s.Verifier.Command != "" {
-			verStr = s.Verifier.Command
-			if len(verStr) > 25 {
-				verStr = verStr[:22] + "..."
-			}
-		}
-
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, status, anchorStr, verStr, s.Title)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+			s.ID, title, s.Lifecycle.State, s.Review.Status, s.Verifier.Result, item.Freshness)
 	}
 	return w.Flush()
 }
 
-func runVerify(root string, args []string) error {
-	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	allFlag := fs.Bool("all", false, "Verify all scars")
-	timeoutFlag := fs.Duration("timeout", 60*time.Second, "Maximum duration per verifier check")
-
-	if err := fs.Parse(args); err != nil {
+func runShow(store *scar.Store, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars show <id>")
+	}
+	id := args[0]
+	s, path, err := store.LoadScar(id)
+	if err != nil {
 		return err
 	}
 
-	targetID := ""
-	if fs.NArg() > 0 {
-		targetID = fs.Arg(0)
+	freshness := store.ComputeFreshness(s)
+
+	fmt.Printf("Scar: %s\n", s.ID)
+	fmt.Printf("Path: %s\n", path)
+	fmt.Printf("Title: %s\n", s.Title)
+	fmt.Printf("Lifecycle State: %s\n", s.Lifecycle.State)
+	fmt.Printf("Review Status: %s (Reviewer: %s, Date: %s)\n", s.Review.Status, s.Review.Reviewer, s.Review.Date)
+	if s.Review.Rationale != "" {
+		fmt.Printf("Review Rationale: %s\n", s.Review.Rationale)
+	}
+	fmt.Printf("Verifier Result: %s\n", s.Verifier.Result)
+	if len(s.Verifier.Argv) > 0 {
+		fmt.Printf("Verifier Command: %s\n", strings.Join(s.Verifier.Argv, " "))
+	}
+	fmt.Printf("Dynamic Freshness: %s\n", freshness)
+	if len(s.Anchors.Files) > 0 {
+		fmt.Printf("Anchored Files:\n")
+		for _, f := range s.Anchors.Files {
+			fmt.Printf("  - %s\n", f)
+		}
+	}
+	if len(s.Anchors.Symbols) > 0 {
+		fmt.Printf("Anchored Symbols: %s\n", strings.Join(s.Anchors.Symbols, ", "))
+	}
+	fmt.Printf("\n--- Lesson ---\n%s\n", s.Lesson)
+	return nil
+}
+
+func runPromote(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("promote", flag.ContinueOnError)
+	status := fs.String("status", scar.LifecycleActive, "Target lifecycle state (active, draft)")
+	reviewer := fs.String("reviewer", "", "Reviewer identifier (e.g. GitHub handle or name)")
+	rationale := fs.String("rationale", "", "Review approval rationale or exception justification")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars promote <id> [--status active] [--reviewer <name>] [--rationale <reason>]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
 	}
 
-	if targetID == "" && !*allFlag {
-		return fmt.Errorf("specify a scar ID (e.g. 'git-scars verify scar-001') or use --all")
-	}
-
-	scarsDir := filepath.Join(root, ".gitscars", "scars")
-	entries, err := os.ReadDir(scarsDir)
+	s, path, err := store.LoadScar(id)
 	if err != nil {
-		return fmt.Errorf("scars directory not found: %w", err)
+		return err
 	}
 
-	var toVerify []*Scar
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(scarsDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		s, err := ParseScar(data)
-		if err != nil {
-			continue
-		}
-		if *allFlag || s.ID == targetID {
-			toVerify = append(toVerify, s)
-		}
+	if err := s.Promote(*status, *reviewer, *rationale); err != nil {
+		return fmt.Errorf("promotion rejected by invariants: %w", err)
 	}
 
-	if len(toVerify) == 0 {
-		if targetID != "" {
-			return fmt.Errorf("scar %q not found", targetID)
-		}
-		fmt.Println("No scars to verify.")
-		return nil
+	if _, err := store.SaveScar(s); err != nil {
+		return fmt.Errorf("failed saving promoted scar: %w", err)
 	}
 
-	fmt.Printf("Verifying %d scar(s)...\n", len(toVerify))
-	failed := 0
-	passed := 0
-	skipped := 0
+	fmt.Printf("Successfully promoted scar %s to state %q\nSaved to: %s\n", s.ID, s.Lifecycle.State, path)
+	return nil
+}
 
-	for _, s := range toVerify {
-		if s.Verifier.Command == "" {
-			fmt.Printf("[-] %s: no verifier command defined (SKIPPED)\n", s.ID)
-			skipped++
-			continue
-		}
+func runRetire(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("retire", flag.ContinueOnError)
+	rationale := fs.String("rationale", "", "Retirement rationale")
 
-		ctx, cancel := context.WithTimeout(context.Background(), *timeoutFlag)
-		cmd := exec.CommandContext(ctx, "sh", "-c", s.Verifier.Command)
-		cmd.Dir = root
-
-		out, err := cmd.CombinedOutput()
-		cancel()
-
-		if err != nil {
-			fmt.Printf("[FAIL] %s: command: %s\n", s.ID, s.Verifier.Command)
-			if len(bytes.TrimSpace(out)) > 0 {
-				lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-				for _, l := range lines {
-					fmt.Printf("       | %s\n", l)
-				}
-			}
-			failed++
-		} else {
-			fmt.Printf("[PASS] %s: command: %s\n", s.ID, s.Verifier.Command)
-			passed++
-		}
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars retire <id> [--rationale <reason>]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
 	}
 
-	fmt.Printf("\nSummary: %d passed, %d failed, %d skipped\n", passed, failed, skipped)
-	if failed > 0 {
-		return fmt.Errorf("%d verification check(s) failed", failed)
+	s, _, err := store.LoadScar(id)
+	if err != nil {
+		return err
 	}
+
+	if err := s.Retire(*rationale); err != nil {
+		return fmt.Errorf("retire rejected: %w", err)
+	}
+
+	if _, err := store.SaveScar(s); err != nil {
+		return fmt.Errorf("failed saving retired scar: %w", err)
+	}
+
+	fmt.Printf("Retired scar %s\n", s.ID)
+	return nil
+}
+
+func runReaffirm(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("reaffirm", flag.ContinueOnError)
+	reviewer := fs.String("reviewer", "", "Reviewer performing reaffirmation")
+	rationale := fs.String("rationale", "", "Documented rationale explaining why lesson remains applicable")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars reaffirm <id> --reviewer <name> --rationale <reason>")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	reaffirmed, err := store.Reaffirm(id, *reviewer, *rationale)
+	if err != nil {
+		return fmt.Errorf("reaffirmation failed: %w", err)
+	}
+
+	fmt.Printf("Reaffirmed scar %s by %s. Anchor baseline updated to current tree.\n", reaffirmed.ID, *reviewer)
 	return nil
 }

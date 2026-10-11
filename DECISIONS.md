@@ -42,3 +42,32 @@ This document tracks significant design choices, trade-offs, evaluated alternati
 - **Consequences**:
   - Provides natural Git integration (`git scars ...`), clean packaging, and avoids collisions with existing Python `scar-cli` or `fscars`.
 
+---
+
+## ADR-0004: Git Pre-Commit Hook & Model Context Protocol (MCP) Server
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Providing friction-free guardrails for both human developers (pre-commit CLI checks) and AI coding assistants (Claude Desktop, Cursor, Antigravity) without requiring external daemon infrastructure or cloud services.
+- **Decision**:
+  - Standardize Git pre-commit hooks via `git-scars hook [install|uninstall|status]` using a POSIX shell script that invokes `git-scars check --diff HEAD`.
+  - Implement a pure Go standard-library JSON-RPC 2.0 stdio MCP server (`git-scars mcp`) exposing `list_scars`, `get_scar`, and `recall_scars`.
+- **Consequences**:
+  - Developers receive warnings or blocks directly at commit time when touching code with active scars.
+  - Coding agents can natively discover, inspect, and retrieve scars over stdio JSON-RPC without ad-hoc shell parsing.
+  - Zero external dependencies; 100% Go standard library.
+
+---
+
+## ADR-0005: Dependency Lockfile Anchoring and Rebuildable Index Cache
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Production regressions frequently correlate with specific library versions (breaking changes, CVEs). Additionally, parsing hundreds of markdown files sequentially in large repositories could add unnecessary I/O overhead.
+- **Decision**:
+  - Implement zero-dependency lockfile parsing for Go (`go.mod`) and Node.js (`package-lock.json`), matching dependencies during retrieval.
+  - Implement a rebuildable local cache `.gitscars/.local/index.json` generated via `git-scars index`.
+- **Consequences**:
+  - Lockfile version changes automatically match relevant scars during recall.
+  - Index cache resides in gitignored `.local/`, preserving clean repository state while providing instant lookup summaries.
+

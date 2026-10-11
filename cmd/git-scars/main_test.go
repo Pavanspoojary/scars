@@ -210,4 +210,28 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"stats", "--json"}); err != nil {
 		t.Fatalf("stats --json command failed: %v", err)
 	}
+
+	// 10. Doctor command (text and JSON)
+	if err := run([]string{"doctor"}); err != nil {
+		t.Fatalf("doctor command failed: %v", err)
+	}
+	if err := run([]string{"doctor", "--json"}); err != nil {
+		t.Fatalf("doctor --json command failed: %v", err)
+	}
+
+	// 11. Interactive add
+	oldStdin := os.Stdin
+	defer func() { os.Stdin = oldStdin }()
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("failed creating pipe: %v", err)
+	}
+	os.Stdin = pr
+	go func() {
+		defer pw.Close()
+		pw.Write([]byte("Interactive Scar\nNever forget this\npkg/worker.go\n"))
+	}()
+	if err := run([]string{"add", "-i"}); err != nil {
+		t.Fatalf("interactive add failed: %v", err)
+	}
 }

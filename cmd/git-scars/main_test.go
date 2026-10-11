@@ -247,4 +247,12 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"sync", "--targets", "AGENTS.md,CLAUDE.md"}); err != nil {
 		t.Fatalf("sync command failed: %v", err)
 	}
+
+	// 14. Triage command (text and JSON)
+	if err := run([]string{"triage", "--error", "panic: deadlock in pkg/worker.go"}); err != nil {
+		t.Fatalf("triage command failed: %v", err)
+	}
+	if err := run([]string{"triage", "--error", "panic: deadlock in pkg/worker.go", "--json"}); err != nil {
+		t.Fatalf("triage --json command failed: %v", err)
+	}
 }

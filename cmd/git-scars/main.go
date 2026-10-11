@@ -74,6 +74,8 @@ func run(args []string) error {
 		return runInject(store, args[1:])
 	case "sync":
 		return runSync(store, args[1:])
+	case "triage":
+		return runTriage(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -105,6 +107,7 @@ Lifecycle Commands:
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
   inject          Generate token-budgeted prompt guardrails for AI agents
   sync            Synchronize active scars into AGENTS.md / CLAUDE.md
+  triage          Diagnose test failures and panic traces against scars (--error/stdin)
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
   doctor          Run repository diagnostics and health checks (--json)
@@ -849,5 +852,71 @@ func runSync(store *scar.Store, args []string) error {
 	for _, r := range results {
 		fmt.Printf("[%s] %s\n", r.Action, r.FilePath)
 	}
+	return nil
+}
+
+func runTriage(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("triage", flag.ContinueOnError)
+	errStr := fs.String("error", "", "Direct error message or panic trace")
+	jsonOut := fs.Bool("json", false, "Output matches in machine-readable JSON")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	input := *errStr
+	if input == "" {
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) == 0 {
+			data, err := io.ReadAll(os.Stdin)
+			if err != nil {
+				return fmt.Errorf("failed reading stdin: %w", err)
+			}
+			input = string(data)
+		}
+	}
+
+	if strings.TrimSpace(input) == "" {
+		return fmt.Errorf("triage requires an error message via --error or piped via stdin")
+	}
+
+	res, err := store.TriageError(input)
+	if err != nil {
+		return err
+	}
+
+	if *jsonOut {
+		data, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	fmt.Println("=== GitScars Failure Triage ===")
+	if res.MatchedSignature != "" {
+		fmt.Printf("Detected Signature: %s\n\n", res.MatchedSignature)
+	}
+
+	if len(res.Matches) == 0 {
+		fmt.Println("No known failure memories matched this error trace.")
+		return nil
+	}
+
+	fmt.Printf("Found %d matching failure memor(ies):\n\n", len(res.Matches))
+	for i, m := range res.Matches {
+		sc := m.Scar
+		fmt.Printf("%d. [%s] (Score: %d) %s\n", i+1, sc.ID, m.Score, sc.Title)
+		fmt.Printf("   Lesson:    %s\n", sc.Lesson)
+		if len(sc.Anchors.Files) > 0 {
+			fmt.Printf("   Anchors:   %s\n", strings.Join(sc.Anchors.Files, ", "))
+		}
+		if len(sc.Verifier.Argv) > 0 {
+			fmt.Printf("   Verifier:  %s\n", strings.Join(sc.Verifier.Argv, " "))
+		}
+		fmt.Println()
+	}
+
 	return nil
 }

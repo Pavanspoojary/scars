@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -64,6 +65,8 @@ func run(args []string) error {
 		return runIndex(store, args[1:])
 	case "diff":
 		return runDiff(store, args[1:])
+	case "stats":
+		return runStats(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -95,6 +98,7 @@ Lifecycle Commands:
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
+  stats           Display repository metrics and feedback statistics (--json)
   index           Rebuild .gitscars/.local/index.json fast cache
   hook            Manage Git pre-commit hook (install, uninstall, status)
   mcp             Run read-only stdio Model Context Protocol (MCP) server
@@ -642,6 +646,45 @@ func runDiff(store *scar.Store, args []string) error {
 		fmt.Println("All anchor baselines are current with working tree.")
 	} else {
 		fmt.Printf("\nTo reaffirm modified baselines after review: git-scars reaffirm %s\n", sc.ID)
+	}
+
+	return nil
+}
+
+func runStats(store *scar.Store, args []string) error {
+	stats, err := store.GetStats()
+	if err != nil {
+		return err
+	}
+
+	for _, a := range args {
+		if a == "--json" {
+			data, err := json.MarshalIndent(stats, "", "  ")
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(data))
+			return nil
+		}
+	}
+
+	fmt.Println("=== GitScars Repository Statistics ===")
+	fmt.Printf("Total Scars:         %d\n", stats.TotalScars)
+	fmt.Println("Lifecycle States:")
+	for state, count := range stats.LifecycleCounts {
+		fmt.Printf("  - %-14s: %d\n", state, count)
+	}
+	fmt.Println("Freshness States:")
+	for freshness, count := range stats.FreshnessCounts {
+		fmt.Printf("  - %-14s: %d\n", freshness, count)
+	}
+	fmt.Printf("Anchors Monitored:   %d files, %d symbols, %d error signatures\n",
+		stats.TotalFiles, stats.TotalSymbols, stats.TotalErrors)
+	if stats.FeedbackTotal > 0 {
+		fmt.Printf("Feedback Summary:    %d entries (%.1f%% helpful)\n",
+			stats.FeedbackTotal, stats.HelpfulRatio)
+	} else {
+		fmt.Println("Feedback Summary:    No feedback recorded yet (.gitscars/.local/feedback.jsonl)")
 	}
 
 	return nil

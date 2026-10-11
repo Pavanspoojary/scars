@@ -1,6 +1,8 @@
 package scar
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -62,4 +64,31 @@ func (s *Store) RecordFeedback(scarID, rating, retrievalMode, notes string) erro
 	}
 
 	return nil
+}
+
+// LoadFeedback reads all recorded feedback entries from .gitscars/.local/feedback.jsonl.
+func (s *Store) LoadFeedback() ([]FeedbackEntry, error) {
+	feedbackPath := filepath.Join(s.LocalDir, FeedbackFileName)
+	data, err := os.ReadFile(feedbackPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	var entries []FeedbackEntry
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var entry FeedbackEntry
+		if err := json.Unmarshal(line, &entry); err == nil {
+			entries = append(entries, entry)
+		}
+	}
+
+	return entries, scanner.Err()
 }

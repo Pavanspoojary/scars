@@ -202,4 +202,12 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"diff", s.ID}); err != nil {
 		t.Fatalf("diff command failed: %v", err)
 	}
+
+	// 9. Stats command (text and JSON)
+	if err := run([]string{"stats"}); err != nil {
+		t.Fatalf("stats command failed: %v", err)
+	}
+	if err := run([]string{"stats", "--json"}); err != nil {
+		t.Fatalf("stats --json command failed: %v", err)
+	}
 }

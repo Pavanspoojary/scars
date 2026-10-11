@@ -58,6 +58,8 @@ func run(args []string) error {
 		return runReaffirm(store, args[1:])
 	case "mcp":
 		return store.ServeMCP(os.Stdin, os.Stdout)
+	case "hook":
+		return runHook(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -547,4 +549,36 @@ func runFeedback(store *scar.Store, args []string) error {
 
 	fmt.Printf("Recorded feedback for scar %s (%s) in .gitscars/.local/feedback.jsonl\n", id, *rating)
 	return nil
+}
+
+func runHook(store *scar.Store, args []string) error {
+	action := "status"
+	if len(args) > 0 {
+		action = args[0]
+	}
+
+	switch action {
+	case "install":
+		if err := scar.InstallPreCommitHook(store.RepoRoot); err != nil {
+			return fmt.Errorf("failed installing pre-commit hook: %w", err)
+		}
+		fmt.Printf("Installed Git pre-commit hook in %s/.git/hooks/pre-commit\n", store.RepoRoot)
+		return nil
+	case "uninstall":
+		if err := scar.UninstallPreCommitHook(store.RepoRoot); err != nil {
+			return fmt.Errorf("failed uninstalling pre-commit hook: %w", err)
+		}
+		fmt.Println("Uninstalled Git pre-commit hook.")
+		return nil
+	case "status":
+		installed := scar.IsHookInstalled(store.RepoRoot)
+		if installed {
+			fmt.Println("Git pre-commit hook is INSTALLED (.git/hooks/pre-commit).")
+		} else {
+			fmt.Println("Git pre-commit hook is NOT installed. Run 'git-scars hook install' to activate.")
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown hook action %q; expected install, uninstall, or status", action)
+	}
 }

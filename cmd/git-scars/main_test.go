@@ -180,4 +180,16 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"feedback", s.ID, "--rating", "helpful", "--notes", "Avoided recurrence"}); err != nil {
 		t.Fatalf("feedback failed: %v", err)
 	}
+
+	// 6. Hook install / status / uninstall
+	_ = os.MkdirAll(filepath.Join(tmpDir, ".git"), 0755)
+	if err := run([]string{"hook", "install"}); err != nil {
+		t.Fatalf("hook install failed: %v", err)
+	}
+	if err := run([]string{"hook", "status"}); err != nil {
+		t.Fatalf("hook status failed: %v", err)
+	}
+	if err := run([]string{"hook", "uninstall"}); err != nil {
+		t.Fatalf("hook uninstall failed: %v", err)
+	}
 }

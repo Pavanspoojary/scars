@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Pavanspoojary/si-scars/pkg/scar"
+	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
 func TestCLIWorkflow(t *testing.T) {

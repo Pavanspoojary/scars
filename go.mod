@@ -1,3 +1,3 @@
-module github.com/Pavanspoojary/si-scars
+module github.com/Pavanspoojary/scars
 
 go 1.26.4

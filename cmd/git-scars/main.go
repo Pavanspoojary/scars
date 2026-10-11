@@ -11,7 +11,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"github.com/Pavanspoojary/si-scars/pkg/scar"
+	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
 const version = "0.2.0"

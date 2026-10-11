@@ -15,7 +15,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "0.2.0"
+const version = "1.0.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -70,6 +70,8 @@ func run(args []string) error {
 		return runStats(store, args[1:])
 	case "doctor":
 		return runDoctor(store, args[1:])
+	case "inject":
+		return runInject(store, args[1:])
 	case "version", "--version", "-v":
 		fmt.Printf("git-scars version %s\n", version)
 		return nil
@@ -99,6 +101,7 @@ Lifecycle Commands:
   retire <id>     Retire a scar that is no longer applicable
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
+  inject          Generate token-budgeted prompt guardrails for AI agents
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
   doctor          Run repository diagnostics and health checks (--json)
@@ -758,4 +761,55 @@ func runDoctor(store *scar.Store, args []string) error {
 	}
 
 	return fmt.Errorf("diagnostics failed: %d errors, %d warnings", report.Errors, report.Warnings)
+}
+
+func runInject(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("inject", flag.ContinueOnError)
+	filesStr := fs.String("files", "", "Comma-separated target files")
+	task := fs.String("task", "", "Active task or query context")
+	symbolsStr := fs.String("symbols", "", "Comma-separated symbols")
+	budget := fs.Int("budget", 400, "Maximum token budget (estimated)")
+	format := fs.String("format", "xml", "Output format: xml or markdown")
+	includeStale := fs.Bool("include-stale", false, "Include drifted scars")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var files []string
+	if *filesStr != "" {
+		for _, f := range strings.Split(*filesStr, ",") {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				files = append(files, f)
+			}
+		}
+	}
+
+	var symbols []string
+	if *symbolsStr != "" {
+		for _, s := range strings.Split(*symbolsStr, ",") {
+			s = strings.TrimSpace(s)
+			if s != "" {
+				symbols = append(symbols, s)
+			}
+		}
+	}
+
+	snippet, err := store.InjectGuardrails(scar.InjectOptions{
+		Files:        files,
+		Task:         *task,
+		Symbols:      symbols,
+		BudgetTokens: *budget,
+		Format:       *format,
+		IncludeStale: *includeStale,
+	})
+	if err != nil {
+		return err
+	}
+
+	if snippet != "" {
+		fmt.Println(snippet)
+	}
+	return nil
 }

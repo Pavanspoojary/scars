@@ -155,7 +155,17 @@ go test ./... 2>&1 | git-scars recall --stdin
 git-scars recall --files pkg/auth/context.go --json
 ```
 
-### 6. Read-Only Freshness Check in CI
+### 6. Token-Budgeted Agent Prompt Injection
+Generate an ultra-dense, token-budget-capped guardrail block for AI coding agents before file editing:
+```bash
+# Generate compact XML block capped to 300 estimated tokens
+git-scars inject --files "pkg/auth/context.go" --budget 300
+
+# Generate Markdown guardrails for prompt templates
+git-scars inject --files "pkg/auth/context.go" --budget 200 --format markdown
+```
+
+### 7. Read-Only Freshness Check in CI
 Add to your CI workflow to ensure no active Scars have stale anchors:
 ```bash
 git-scars check
@@ -166,7 +176,7 @@ git-scars check
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
-### 7. Git Pre-Commit Hook Guardrail
+### 8. Git Pre-Commit Hook Guardrail
 Install the Git pre-commit hook to catch stale active scars before staging and committing:
 ```bash
 # Install hook into .git/hooks/pre-commit
@@ -179,7 +189,7 @@ git-scars hook status
 git-scars hook uninstall
 ```
 
-### 8. Inspect Drift & Reaffirm
+### 9. Inspect Drift & Reaffirm
 When `git-scars check` or pre-commit hooks report modified anchors, inspect the exact unified diff before reaffirming:
 ```bash
 # View unified line diff against recorded anchor baseline
@@ -191,7 +201,7 @@ git-scars reaffirm map-write-crash-391945 \
   --rationale "Verified logic holds after refactoring exporter package"
 ```
 
-### 9. Repository Health & Metrics
+### 10. Repository Health & Metrics
 Inspect overall repository scar metrics, monitored anchors, and recorded feedback:
 ```bash
 # Human-readable summary
@@ -201,7 +211,7 @@ git-scars stats
 git-scars stats --json
 ```
 
-### 10. Run Full Diagnostics
+### 11. Run Full Diagnostics
 Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
@@ -366,6 +376,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
+| `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails for AI agents |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
 | `lint` | none | Security and schema audit (checks traversal, injections, duplicate titles) |
 | `doctor` | `[--json]` | Run repository diagnostics across Git, store, schemas, invariants, drift, hooks, and index |

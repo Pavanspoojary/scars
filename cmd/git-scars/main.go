@@ -16,7 +16,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.1.0"
+const version = "1.2.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -67,6 +67,12 @@ func run(args []string) error {
 		return runSupersede(store, args[1:])
 	case "dedupe":
 		return runDedupe(store, args[1:])
+	case "harvest":
+		return runHarvest(store, args[1:])
+	case "bundle":
+		return runBundle(store, args[1:])
+	case "heal":
+		return runHeal(store, args[1:])
 	case "mcp":
 		return store.ServeMCP(os.Stdin, os.Stdout)
 	case "hook":
@@ -104,7 +110,7 @@ Usage:
   git-scars <command> [arguments]
 
 Lifecycle Commands:
-  init            Initialize .gitscars/ repository metadata and config (--agent)
+  init            Initialize .gitscars/ repository metadata and config (--agent, --ci)
   add             Create a new scar draft (interactive -i or --title/--lesson/--files)
   list            List recorded scars with lifecycle, review, and dynamic freshness
   show <id>       Display full metadata and lesson for a scar
@@ -116,12 +122,15 @@ Lifecycle Commands:
   retire <id>     Retire a scar that is no longer applicable
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
-  enforce         Pre-edit blocking guardrail check (--files, --fail-on, --staged)
+  enforce         Pre-edit blocking guardrail check (--files, --fail-on, --format sarif)
   inject          Generate token-budgeted prompt guardrails for AI agents
   sync            Synchronize active scars into AGENTS.md / CLAUDE.md
   triage          Diagnose test failures and panic traces against scars (--error/stdin)
   dedupe          Detect duplicate and near-duplicate scars (--min, --dry-run, --json)
-  check           Read-only verification of scar freshness and invariants
+  harvest         Automatically mine bug fixes from Git history into scar drafts
+  bundle          Export and import portable memory bundles (export, import)
+  heal            Run test command and automatically triage failures (-- <cmd>)
+  check           Read-only verification of freshness and invariants (--format sarif)
   lint            Audit scars for security, wildcards, and schema validity
   doctor          Run repository diagnostics and health checks (--json, --fix)
   stats           Display repository metrics and feedback statistics (--json)
@@ -159,6 +168,7 @@ func findRepoRoot() string {
 func runInit(store *scar.Store, args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	agent := fs.String("agent", "", "Optional comma-separated agent configuration targets (claude, cursor, zed, antigravity)")
+	ci := fs.String("ci", "", "Optional CI/CD workflow generator (github)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -176,6 +186,22 @@ func runInit(store *scar.Store, args []string) error {
 			} else {
 				fmt.Printf("Configured %s integration files successfully.\n", a)
 			}
+		}
+	}
+
+	if *ci != "" {
+		switch strings.ToLower(strings.TrimSpace(*ci)) {
+		case "github":
+			ciPath := filepath.Join(store.RepoRoot, ".github", "workflows", "git-scars.yml")
+			if err := os.MkdirAll(filepath.Dir(ciPath), 0755); err != nil {
+				return fmt.Errorf("failed creating .github/workflows directory: %w", err)
+			}
+			if err := os.WriteFile(ciPath, []byte(scar.GitHubWorkflowYAML()), 0644); err != nil {
+				return fmt.Errorf("failed writing github workflow: %w", err)
+			}
+			fmt.Println("Configured GitHub Actions workflow in .github/workflows/git-scars.yml")
+		default:
+			return fmt.Errorf("unsupported CI target: %s (supported: github)", *ci)
 		}
 	}
 	return nil
@@ -618,6 +644,7 @@ func runRecall(store *scar.Store, args []string) error {
 func runCheck(store *scar.Store, args []string) error {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	diffRef := fs.String("diff", "", "Optional git diff ref to evaluate anchor changes")
+	format := fs.String("format", "text", "Output format: text, sarif")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -626,6 +653,19 @@ func runCheck(store *scar.Store, args []string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Operational error: %v\n", err)
 		os.Exit(3)
+	}
+
+	if *format == "sarif" {
+		summaries, _ := store.ListScars()
+		sarifData, err := scar.FormatCheckSARIF(summaries, res.InvalidScars)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(sarifData))
+		if res.ExitCode != 0 {
+			os.Exit(res.ExitCode)
+		}
+		return nil
 	}
 
 	fmt.Printf("=== GitScars Read-Only Check ===\n")
@@ -1085,8 +1125,9 @@ func runEnforce(store *scar.Store, args []string) error {
 	filesStr := fs.String("files", "", "Comma-separated target file paths")
 	symbolsStr := fs.String("symbols", "", "Comma-separated target symbols")
 	failOn := fs.String("fail-on", "high", "Failure threshold severity: critical, high, medium, low")
+	format := fs.String("format", "text", "Output format: text, json, sarif")
 	staged := fs.Bool("staged", false, "Automatically inspect staged files from git diff --cached")
-	asJSON := fs.Bool("json", false, "Output result in JSON format")
+	asJSON := fs.Bool("json", false, "Output result in JSON format (shorthand for --format json)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -1132,12 +1173,24 @@ func runEnforce(store *scar.Store, args []string) error {
 		return err
 	}
 
-	if *asJSON {
+	if *asJSON || *format == "json" {
 		data, err := json.MarshalIndent(res, "", "  ")
 		if err != nil {
 			return err
 		}
 		fmt.Println(string(data))
+		if res.Blocked {
+			os.Exit(2)
+		}
+		return nil
+	}
+
+	if *format == "sarif" {
+		sarifData, err := scar.FormatEnforceSARIF(res)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(sarifData))
 		if res.Blocked {
 			os.Exit(2)
 		}
@@ -1175,6 +1228,242 @@ func runEnforce(store *scar.Store, args []string) error {
 		fmt.Fprintln(os.Stderr)
 	}
 	os.Exit(2)
+	return nil
+}
+
+func runHarvest(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("harvest", flag.ContinueOnError)
+	maxCommits := fs.Int("max", 50, "Maximum recent git commits to scan")
+	since := fs.String("since", "", "Optional Git revision to start scanning from (e.g. HEAD~20, main)")
+	dryRun := fs.Bool("dry-run", false, "Preview candidate fix commits without creating draft scars")
+	asJSON := fs.Bool("json", false, "Output results in JSON format")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	res, err := store.HarvestCommits(scar.HarvestOptions{
+		MaxCommits: *maxCommits,
+		SinceRef:   *since,
+		DryRun:     *dryRun,
+	})
+	if err != nil {
+		return fmt.Errorf("harvest failed: %w", err)
+	}
+
+	if *asJSON {
+		data, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	fmt.Println("=== GitScars Regression Harvest ===")
+	fmt.Printf("Scanned Commits: %d | Discovered Fixes: %d | Drafts Created: %d\n\n",
+		res.ScannedCommits, res.FoundFixes, res.DraftsCreated)
+
+	if len(res.Candidates) == 0 {
+		fmt.Println("No candidate bug-fix commits found in scanned history.")
+		return nil
+	}
+
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "COMMIT\tSUGGESTED ID\tFILES\tSUBJECT")
+	for _, c := range res.Candidates {
+		shortSha := c.CommitSHA
+		if len(shortSha) > 8 {
+			shortSha = shortSha[:8]
+		}
+		files := strings.Join(c.Files, ",")
+		if len(files) > 25 {
+			files = files[:22] + "..."
+		}
+		subj := c.Subject
+		if len(subj) > 40 {
+			subj = subj[:37] + "..."
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", shortSha, c.SuggestedID, files, subj)
+	}
+	_ = w.Flush()
+
+	if *dryRun {
+		fmt.Println("\n(Dry run: no drafts were written. Run without --dry-run to create drafts)")
+	} else if res.DraftsCreated > 0 {
+		fmt.Printf("\nCreated %d reviewable draft scar(s) in .gitscars/scars/. Review and promote with:\n", res.DraftsCreated)
+		for _, c := range res.Candidates {
+			if c.DraftPath != "" {
+				fmt.Printf("  git-scars verify %s && git-scars promote %s\n", c.SuggestedID, c.SuggestedID)
+			}
+		}
+	}
+	return nil
+}
+
+func runBundle(store *scar.Store, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars bundle export [options] | git-scars bundle import <file> [options]")
+	}
+
+	switch args[0] {
+	case "export":
+		fs := flag.NewFlagSet("bundle export", flag.ContinueOnError)
+		out := fs.String("out", "", "Output bundle file path (defaults to stdout if omitted)")
+		all := fs.Bool("all", false, "Include drafts and unreviewed scars in export")
+		sev := fs.String("severity", "", "Filter by severity (critical, high, medium, low)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+
+		data, err := store.ExportBundle(scar.BundleExportOptions{
+			FilterSeverity: *sev,
+			IncludeDrafts:  *all,
+		})
+		if err != nil {
+			return fmt.Errorf("bundle export failed: %w", err)
+		}
+
+		if *out != "" {
+			if err := os.WriteFile(*out, data, 0644); err != nil {
+				return fmt.Errorf("failed writing bundle file: %w", err)
+			}
+			fmt.Printf("Exported memory bundle to %s (%d bytes)\n", *out, len(data))
+		} else {
+			fmt.Println(string(data))
+		}
+		return nil
+
+	case "import":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: git-scars bundle import <bundle.json> [--prefix <org->] [--dry-run]")
+		}
+		filePath := args[1]
+		fs := flag.NewFlagSet("bundle import", flag.ContinueOnError)
+		prefix := fs.String("prefix", "", "Optional ID prefix for imported scars (e.g. org-, team-)")
+		dryRun := fs.Bool("dry-run", false, "Preview import without creating draft files")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("failed reading bundle file %s: %w", filePath, err)
+		}
+
+		res, err := store.ImportBundle(data, scar.BundleImportOptions{
+			IDPrefix: *prefix,
+			DryRun:   *dryRun,
+		})
+		if err != nil {
+			return fmt.Errorf("bundle import failed: %w", err)
+		}
+
+		fmt.Println("=== GitScars Bundle Import ===")
+		fmt.Printf("Total in Bundle: %d | Imported Drafts: %d | Skipped: %d\n",
+			res.TotalInBundle, res.Imported, res.Skipped)
+		if len(res.ImportedIDs) > 0 {
+			fmt.Printf("Imported Scars: %s\n", strings.Join(res.ImportedIDs, ", "))
+			fmt.Println("All imported scars are drafted as unreviewed. Verify and promote to activate.")
+		}
+		return nil
+
+	default:
+		return fmt.Errorf("unknown bundle action %q; expected export or import", args[0])
+	}
+}
+
+func runHeal(store *scar.Store, args []string) error {
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars heal [--json] -- <test-command...>")
+	}
+
+	fs := flag.NewFlagSet("heal", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "Output heal report in JSON format")
+
+	cmdArgs := args
+	for i, arg := range args {
+		if arg == "--" {
+			if err := fs.Parse(args[:i]); err != nil {
+				return err
+			}
+			cmdArgs = args[i+1:]
+			break
+		}
+	}
+	if len(cmdArgs) == len(args) {
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		cmdArgs = fs.Args()
+	}
+
+	if len(cmdArgs) == 0 {
+		return fmt.Errorf("no test command specified to heal; example: git-scars heal -- go test ./...")
+	}
+
+	ctx := context.Background()
+	report, err := store.RunHealCommand(ctx, cmdArgs)
+	if err != nil {
+		return fmt.Errorf("heal execution failed: %w", err)
+	}
+
+	if *asJSON {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		if !report.Success {
+			os.Exit(report.ExitCode)
+		}
+		return nil
+	}
+
+	if report.Success {
+		fmt.Printf("✓ Command %q succeeded in %dms (exit code 0)\n",
+			strings.Join(report.Command, " "), report.DurationMs)
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "✗ Command %q failed with exit code %d (%dms)\n",
+		strings.Join(report.Command, " "), report.ExitCode, report.DurationMs)
+
+	if report.Language != "" || report.FailureKind != "" {
+		fmt.Fprintf(os.Stderr, "  Failure Signature: [%s] %s\n", report.Language, report.FailureKind)
+	}
+	if report.ExtractedError != "" {
+		fmt.Fprintf(os.Stderr, "  Extracted Error:   %s\n", report.ExtractedError)
+	}
+
+	if len(report.MatchedScars) > 0 {
+		fmt.Fprintf(os.Stderr, "\n=== Matched Regression Scars (%d) ===\n", len(report.MatchedScars))
+		for i, m := range report.MatchedScars {
+			sc := m.Scar
+			fmt.Fprintf(os.Stderr, "[%d] %s (Score: %d | Severity: %s)\n", i+1, sc.ID, m.Score, sc.Severity)
+			fmt.Fprintf(os.Stderr, "    Title:  %s\n", sc.Title)
+			fmt.Fprintf(os.Stderr, "    Lesson: %s\n", sc.Lesson)
+			if sc.FixHint != "" {
+				fmt.Fprintf(os.Stderr, "    Fix:    %s\n", sc.FixHint)
+			}
+			if sc.BadPattern != "" {
+				fmt.Fprintf(os.Stderr, "    Don't:  %s\n", sc.BadPattern)
+			}
+			if sc.GoodPattern != "" {
+				fmt.Fprintf(os.Stderr, "    Do:     %s\n", sc.GoodPattern)
+			}
+			if len(sc.Verifier.Argv) > 0 {
+				fmt.Fprintf(os.Stderr, "    Verify: %s\n", strings.Join(sc.Verifier.Argv, " "))
+			}
+			fmt.Fprintln(os.Stderr)
+		}
+	}
+
+	if report.SuggestedCommand != "" {
+		fmt.Fprintf(os.Stderr, "Suggested Verification: %s\n", report.SuggestedCommand)
+	}
+
+	os.Exit(report.ExitCode)
 	return nil
 }
 

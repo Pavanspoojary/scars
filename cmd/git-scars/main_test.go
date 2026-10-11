@@ -310,4 +310,37 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"supersede", s.ID, "--by", newID}); err != nil {
 		t.Fatalf("supersede failed: %v", err)
 	}
+
+	// 21. CI workflow generation
+	if err := run([]string{"init", "--ci", "github"}); err != nil {
+		t.Fatalf("init --ci github failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".github", "workflows", "git-scars.yml")); os.IsNotExist(err) {
+		t.Errorf("expected .github/workflows/git-scars.yml to exist")
+	}
+
+	// 22. SARIF format support in check and enforce
+	if err := run([]string{"check", "--format", "sarif"}); err != nil {
+		t.Fatalf("check --format sarif failed: %v", err)
+	}
+	if err := run([]string{"enforce", "--files", "pkg/clean.go", "--format", "sarif"}); err != nil {
+		t.Fatalf("enforce --format sarif failed: %v", err)
+	}
+
+	// 23. Memory bundle export and import
+	bundleFile := filepath.Join(tmpDir, "bundle.json")
+	if err := run([]string{"bundle", "export", "--all", "--out", bundleFile}); err != nil {
+		t.Fatalf("bundle export failed: %v", err)
+	}
+	if _, err := os.Stat(bundleFile); os.IsNotExist(err) {
+		t.Fatalf("expected bundle file to exist at %s", bundleFile)
+	}
+	if err := run([]string{"bundle", "import", bundleFile, "--prefix", "imported-"}); err != nil {
+		t.Fatalf("bundle import failed: %v", err)
+	}
+
+	// 24. Self-healing execution
+	if err := run([]string{"heal", "--", "echo", "test execution successful"}); err != nil {
+		t.Fatalf("heal with successful command failed: %v", err)
+	}
 }

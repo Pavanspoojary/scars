@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -205,6 +206,13 @@ func parseYAMLMap(lines []string, s *Scar) error {
 					s.Verifier.OutputHash = unquoteVal(subVal)
 				}
 			case "baseline":
+				if currentSubSection == "symbol_hashes" {
+					if s.Baseline.SymbolHashes == nil {
+						s.Baseline.SymbolHashes = make(map[string]string)
+					}
+					s.Baseline.SymbolHashes[subKey] = unquoteVal(subVal)
+					continue
+				}
 				if s.Baseline.AnchorHashes == nil {
 					s.Baseline.AnchorHashes = make(map[string]string)
 				}
@@ -352,6 +360,17 @@ func FormatFrontmatter(s *Scar) ([]byte, error) {
 	}
 	for p, h := range s.Baseline.AnchorHashes {
 		buf.WriteString(fmt.Sprintf("  %s: %s\n", p, strconv.Quote(h)))
+	}
+	if len(s.Baseline.SymbolHashes) > 0 {
+		buf.WriteString("  symbol_hashes:\n")
+		var symKeys []string
+		for k := range s.Baseline.SymbolHashes {
+			symKeys = append(symKeys, k)
+		}
+		sort.Strings(symKeys)
+		for _, k := range symKeys {
+			buf.WriteString(fmt.Sprintf("    %s: %s\n", k, strconv.Quote(s.Baseline.SymbolHashes[k])))
+		}
 	}
 
 	// Review

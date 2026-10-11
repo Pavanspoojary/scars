@@ -252,6 +252,20 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 				return FreshnessUnavailable
 			}
 			if currentHash != expectedHash {
+				// Fine-grained AST check: if anchored symbols are recorded and unchanged, preserve current status
+				if len(scar.Baseline.SymbolHashes) > 0 && strings.HasSuffix(relPath, ".go") {
+					allPreserved := true
+					for sym, baselineHash := range scar.Baseline.SymbolHashes {
+						currSymHash, err := ExtractGoSymbolHash(fullPath, sym)
+						if err != nil || currSymHash != baselineHash {
+							allPreserved = false
+							break
+						}
+					}
+					if allPreserved {
+						return FreshnessCurrent
+					}
+				}
 				return FreshnessChanged
 			}
 		}
@@ -259,6 +273,7 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 	}
 
 	type checkResult struct {
+		relPath     string
 		unavailable bool
 		changed     bool
 	}
@@ -273,14 +288,14 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 			fullPath := filepath.Join(s.RepoRoot, rp)
 			curr, err := hashFile(fullPath)
 			if err != nil {
-				results <- checkResult{unavailable: true}
+				results <- checkResult{relPath: rp, unavailable: true}
 				return
 			}
 			if curr != exp {
-				results <- checkResult{changed: true}
+				results <- checkResult{relPath: rp, changed: true}
 				return
 			}
-			results <- checkResult{}
+			results <- checkResult{relPath: rp}
 		}(relPath, expectedHash)
 	}
 
@@ -298,6 +313,34 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 	}
 
 	if hasChanged {
+		// Fine-grained AST symbol verification across modified files
+		if len(scar.Baseline.SymbolHashes) > 0 {
+			allPreserved := true
+			for sym, baselineHash := range scar.Baseline.SymbolHashes {
+				found := false
+				for _, f := range scar.Anchors.Files {
+					if !strings.HasSuffix(f, ".go") {
+						continue
+					}
+					fullPath := filepath.Join(s.RepoRoot, f)
+					currSymHash, err := ExtractGoSymbolHash(fullPath, sym)
+					if err == nil {
+						found = true
+						if currSymHash != baselineHash {
+							allPreserved = false
+							break
+						}
+					}
+				}
+				if !found || !allPreserved {
+					allPreserved = false
+					break
+				}
+			}
+			if allPreserved {
+				return FreshnessCurrent
+			}
+		}
 		return FreshnessChanged
 	}
 	return FreshnessCurrent
@@ -330,6 +373,12 @@ func (s *Store) RecordBaseline(scar *Scar, commandHash string) error {
 		if err == nil {
 			scar.Baseline.AnchorHashes[f] = h
 		}
+	}
+
+	// Compute and record fine-grained AST symbol baselines
+	symHashes := s.ComputeSymbolBaselines(scar)
+	if len(symHashes) > 0 {
+		scar.Baseline.SymbolHashes = symHashes
 	}
 
 	if commandHash != "" {

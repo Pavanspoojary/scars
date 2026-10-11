@@ -166,6 +166,31 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Closed learning loop enables repository memory to self-clean over time without manual editing of YAML frontmatter.
   - Parallel hashing delivers ~6x faster cold freshness checks at scale while maintaining zero external dependencies and 100% standard library compliance.
 
+---
+
+## ADR-0012: AST-Aware Symbol Anchoring, Portable Memory Bundles, and SARIF PR Annotations
+
+- **Date**: 2026-10-12
+- **Status**: Accepted
+- **Context**:
+  - File-level SHA-256 freshness baselines flag false-positive anchor drift when comments, formatting, or unrelated helper functions in the same file are edited, requiring unnecessary human reaffirmations.
+  - Development teams working across multiple services or migrating legacy repositories need to automatically mine past bug fixes from Git history and exchange portable, verified failure memories across repositories without sharing entire Git histories.
+  - CI/CD pipelines (GitHub Actions, GitLab CI) need standardized machine-readable static analysis and security scanning annotations to surface guardrails directly on pull request lines.
+  - Coding agents require an automated test-execution loop that executes test suites, intercepts failures, correlates error logs with recorded scars, and generates instant remediation guidance.
+- **Decision**:
+  - Implemented Go standard library AST parsing (`go/parser`, `go/ast`) to extract symbol declaration hashes (`SymbolASTBaselines`). Freshness checks evaluate fine-grained symbol drift: if the overall file SHA changes but anchored functions/types are unchanged, the scar remains `current`.
+  - Implemented automated bug-fix commit mining via `git-scars harvest` detecting conventional commit fix patterns (`fix:`, `closes #`, etc.), extracting modified files, and scaffolding reviewable draft scars.
+  - Implemented portable memory bundles (`gitscars.bundle.v1`) via `git-scars bundle export` and `git-scars bundle import`. All imported scars are strictly downgraded to `draft` with `unreviewed` status to preserve verification and code-review invariants.
+  - Implemented native OASIS SARIF 2.1.0 output in `git-scars check --format sarif` and `git-scars enforce --format sarif`, complete with an automated workflow generator `git-scars init --ci github` creating `.github/workflows/git-scars.yml`.
+  - Implemented `git-scars heal -- <test-command>` executing commands, intercepting failures, triaging error traces against active scars, and generating actionable remediation XML/text output.
+- **Consequences**:
+  - Eliminates false-positive freshness invalidations when non-anchored symbols change in monitored source files.
+  - Accelerates adoption on legacy codebases by transforming historical commit logs into structured guardrails.
+  - Enables zero-configuration GitHub Code Scanning PR annotations and cross-repository memory sharing.
+  - Maintains 100% Go standard library implementation with zero external dependencies.
+
+
+
 
 
 

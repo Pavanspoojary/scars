@@ -122,6 +122,18 @@ git-scars hook status
 git-scars hook uninstall
 ```
 
+### 8. Inspect Drift & Reaffirm
+When `git-scars check` or pre-commit hooks report modified anchors, inspect the exact unified diff before reaffirming:
+```bash
+# View unified line diff against recorded anchor baseline
+git-scars diff map-write-crash-391945
+
+# Reaffirm anchor baseline after human review
+git-scars reaffirm map-write-crash-391945 \
+  --reviewer "alice" \
+  --rationale "Verified logic holds after refactoring exporter package"
+```
+
 ---
 
 ## File Format & Repository Storage
@@ -232,9 +244,11 @@ Add to your assistant's MCP configuration (e.g. `claude_desktop_config.json` or 
 
 ### Dependency Lockfile Anchors
 
-GitScars automatically inspects repository dependency lockfiles to anchor lessons to exact dependency versions without manual specification:
-- **Go**: Parses direct dependencies and versions from `go.mod`.
-- **Node.js**: Parses packages and versions from `package-lock.json`.
+GitScars automatically inspects repository dependency manifests and lockfiles to anchor lessons to exact package versions without manual configuration:
+- **Go**: Parses direct module dependencies and versions from `go.mod`.
+- **Node.js**: Parses packages and versions from `package-lock.json` (v1, v2, and v3 formats).
+- **Rust**: Parses package blocks and versions from `Cargo.lock`.
+- **Python**: Parses package requirements and versions from `poetry.lock` and `requirements.txt`.
 
 When dependencies are bumped or downgraded, Scars anchored to vulnerable or breaking versions automatically trigger match signals during recall.
 

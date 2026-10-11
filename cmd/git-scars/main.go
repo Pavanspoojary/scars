@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -35,7 +36,9 @@ func run(args []string) error {
 
 	switch args[0] {
 	case "init":
-		return runInit(store)
+		return runInit(store, args[1:])
+	case "enforce":
+		return runEnforce(store, args[1:])
 	case "add":
 		return runAdd(store, args[1:])
 	case "list":
@@ -95,7 +98,7 @@ Usage:
   git-scars <command> [arguments]
 
 Lifecycle Commands:
-  init            Initialize .gitscars/ repository metadata and config
+  init            Initialize .gitscars/ repository metadata and config (--agent)
   add             Create a new scar draft (interactive -i or --title/--lesson/--files)
   list            List recorded scars with lifecycle, review, and dynamic freshness
   show <id>       Display full metadata and lesson for a scar
@@ -105,6 +108,7 @@ Lifecycle Commands:
   retire <id>     Retire a scar that is no longer applicable
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
+  enforce         Pre-edit blocking guardrail check (--files, --fail-on, --staged)
   inject          Generate token-budgeted prompt guardrails for AI agents
   sync            Synchronize active scars into AGENTS.md / CLAUDE.md
   triage          Diagnose test failures and panic traces against scars (--error/stdin)
@@ -143,11 +147,28 @@ func findRepoRoot() string {
 	return dir
 }
 
-func runInit(store *scar.Store) error {
+func runInit(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	agent := fs.String("agent", "", "Optional comma-separated agent configuration targets (claude, cursor, zed, antigravity)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	if err := store.Init(); err != nil {
 		return fmt.Errorf("initialization failed: %w", err)
 	}
 	fmt.Printf("Initialized GitScars in %s/.gitscars\n", store.RepoRoot)
+
+	if *agent != "" {
+		for _, a := range strings.Split(*agent, ",") {
+			a = strings.ToLower(strings.TrimSpace(a))
+			if err := scaffoldAgent(store.RepoRoot, a); err != nil {
+				fmt.Printf("warning: failed configuring agent %s: %v\n", a, err)
+			} else {
+				fmt.Printf("Configured %s integration files successfully.\n", a)
+			}
+		}
+	}
 	return nil
 }
 
@@ -919,4 +940,172 @@ func runTriage(store *scar.Store, args []string) error {
 	}
 
 	return nil
+}
+
+func runEnforce(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("enforce", flag.ContinueOnError)
+	filesStr := fs.String("files", "", "Comma-separated target file paths")
+	symbolsStr := fs.String("symbols", "", "Comma-separated target symbols")
+	failOn := fs.String("fail-on", "high", "Failure threshold severity: critical, high, medium, low")
+	staged := fs.Bool("staged", false, "Automatically inspect staged files from git diff --cached")
+	asJSON := fs.Bool("json", false, "Output result in JSON format")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var files []string
+	if *filesStr != "" {
+		for _, f := range strings.Split(*filesStr, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				files = append(files, f)
+			}
+		}
+	}
+
+	if *staged && scar.GitAvailable(store.RepoRoot) {
+		cmd := exec.Command("git", "diff", "--cached", "--name-only")
+		cmd.Dir = store.RepoRoot
+		out, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					files = append(files, line)
+				}
+			}
+		}
+	}
+
+	var symbols []string
+	if *symbolsStr != "" {
+		for _, s := range strings.Split(*symbolsStr, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				symbols = append(symbols, s)
+			}
+		}
+	}
+
+	res, err := store.Enforce(scar.EnforceOptions{
+		Files:   files,
+		Symbols: symbols,
+		FailOn:  *failOn,
+	})
+	if err != nil {
+		return err
+	}
+
+	if *asJSON {
+		data, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		if res.Blocked {
+			os.Exit(2)
+		}
+		return nil
+	}
+
+	if !res.Blocked {
+		fmt.Println("clean: no blocking regression scars detected")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "=== [GUARDRAIL BLOCKED] Pre-Edit Safety Check Failed ===\n")
+	fmt.Fprintf(os.Stderr, "%s\n\n", res.Reason)
+	for i, sc := range res.BlockingScars {
+		s := sc.Scar
+		sev := s.Severity
+		if sev == "" {
+			sev = scar.SeverityMedium
+		}
+		fmt.Fprintf(os.Stderr, "[%d] %s (%s severity | Score: %d | Confidence: %.2f)\n", i+1, s.ID, sev, sc.Score, sc.Confidence)
+		fmt.Fprintf(os.Stderr, "    Title:  %s\n", s.Title)
+		fmt.Fprintf(os.Stderr, "    Lesson: %s\n", s.Lesson)
+		if s.FixHint != "" {
+			fmt.Fprintf(os.Stderr, "    Hint:   %s\n", s.FixHint)
+		}
+		if s.BadPattern != "" {
+			fmt.Fprintf(os.Stderr, "    Don't:  %s\n", s.BadPattern)
+		}
+		if s.GoodPattern != "" {
+			fmt.Fprintf(os.Stderr, "    Do:     %s\n", s.GoodPattern)
+		}
+		if len(s.Verifier.Argv) > 0 {
+			fmt.Fprintf(os.Stderr, "    Verify: %s\n", strings.Join(s.Verifier.Argv, " "))
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+	os.Exit(2)
+	return nil
+}
+
+func scaffoldAgent(repoRoot, agent string) error {
+	switch agent {
+	case "claude":
+		dir := filepath.Join(repoRoot, ".claude")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		mcpPath := filepath.Join(dir, "mcp.json")
+		content := `{
+  "mcpServers": {
+    "git-scars": {
+      "command": "git-scars",
+      "args": ["mcp"]
+    }
+  }
+}
+`
+		return os.WriteFile(mcpPath, []byte(content), 0644)
+	case "cursor":
+		dir := filepath.Join(repoRoot, ".cursor", "rules")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		rulePath := filepath.Join(dir, "git-scars.mdc")
+		content := `---
+description: GitScars regression guardrails
+globs: *
+alwaysApply: true
+---
+Before editing code files, execute:
+git-scars enforce --files "<file1,file2>" --fail-on high
+
+If tests or builds fail, execute:
+git-scars triage --error "<error_text>"
+`
+		return os.WriteFile(rulePath, []byte(content), 0644)
+	case "zed":
+		dir := filepath.Join(repoRoot, ".zed")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		path := filepath.Join(dir, "settings.json")
+		content := `{
+  "context_servers": [
+    {
+      "id": "git-scars",
+      "command": {
+        "path": "git-scars",
+        "args": ["mcp"]
+      }
+    }
+  ]
+}
+`
+		return os.WriteFile(path, []byte(content), 0644)
+	case "antigravity":
+		dir := filepath.Join(repoRoot, ".gemini", "config", "rules")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		path := filepath.Join(dir, "git-scars.md")
+		content := `# GitScars Regression Guardrail Policy
+Before modifying repository code, query active guardrails:
+` + "```bash\n" + `git-scars enforce --files "<target_files>" --fail-on high` + "\n```\n"
+		return os.WriteFile(path, []byte(content), 0644)
+	default:
+		return fmt.Errorf("unsupported agent target: %s (supported: claude, cursor, zed, antigravity)", agent)
+	}
 }

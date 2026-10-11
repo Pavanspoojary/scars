@@ -46,6 +46,13 @@ if command -v git-scars >/dev/null 2>&1; then
         echo "[git-scars] Commit rejected: blocking findings detected (exit code $EXIT_CODE)."
         exit $EXIT_CODE
     fi
+
+    git-scars enforce --staged --fail-on high
+    ENFORCE_CODE=$?
+    if [ $ENFORCE_CODE -ne 0 ]; then
+        echo "[git-scars] Commit rejected by pre-edit enforce guard (exit code $ENFORCE_CODE)."
+        exit $ENFORCE_CODE
+    fi
 fi
 `, HookMarker)
 

@@ -26,6 +26,7 @@ type IndexEntry struct {
 	Lesson          string             `json:"lesson"`
 	Lifecycle       string             `json:"lifecycle"`
 	ReviewStatus    string             `json:"review_status"`
+	Severity        string             `json:"severity,omitempty"`
 	Files           []string           `json:"files,omitempty"`
 	Symbols         []string           `json:"symbols,omitempty"`
 	Commands        []string           `json:"commands,omitempty"`
@@ -61,6 +62,7 @@ func (s *Store) RebuildIndex() (*IndexCache, error) {
 			Lesson:          sc.Lesson,
 			Lifecycle:       sc.Lifecycle.State,
 			ReviewStatus:    sc.Review.Status,
+			Severity:        sc.Severity,
 			Files:           sc.Anchors.Files,
 			Symbols:         sc.Anchors.Symbols,
 			Commands:        sc.Anchors.Commands,

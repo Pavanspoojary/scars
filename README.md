@@ -258,6 +258,10 @@ id: "map-write-crash-391945"
 slug: "concurrent-map-write-in-telemetry-exporter"
 title: "Concurrent map write in telemetry exporter"
 lesson: "Metrics map must be protected by sync.RWMutex during RecordMetric calls."
+severity: "high"
+fix_hint: "Wrap map mutations in mu.Lock() or replace with sync.Map"
+bad_pattern: "m[key] = val"
+good_pattern: "mu.Lock(); m[key] = val; mu.Unlock()"
 applicability: "Telemetry exporters handling concurrent metrics emissions."
 anchors:
   files:
@@ -380,6 +384,32 @@ Output:
 }
 ```
 
+### 3. Pre-Edit Guardrail Enforcement (`git-scars enforce`)
+
+Prevent AI coding agents and developers from re-introducing known regressions before files are modified:
+
+```bash
+# Check files before editing; returns exit code 2 if a high-severity guardrail matches
+git-scars enforce --files "pkg/worker.go" --fail-on high
+```
+
+Exit Codes:
+- `0`: Clean (no blocking guardrails detected).
+- `2`: Blocked (blocking guardrail detected; outputs actionable `<dont>`, `<do>`, and verification instructions to stderr).
+
+Machine JSON Output:
+```bash
+git-scars enforce --files "pkg/worker.go" --json
+```
+
+### 4. Zero-Friction Agent Onboarding (`git-scars init --agent`)
+
+Configure coding assistants with a single setup command:
+```bash
+git-scars init --agent claude,cursor,zed,antigravity
+```
+Automatically scaffolds `.claude/mcp.json`, `.cursor/rules/git-scars.mdc`, `.zed/settings.json`, and `.gemini/config/rules/git-scars.md`.
+
 ---
 
 ## Dependency Manifest & Lockfile Anchors
@@ -399,7 +429,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
-| `init` | none | Initialize `.gitscars/` repository metadata and default config |
+| `init` | `[--agent <targets>]` | Initialize `.gitscars/` repository and optional agent configs (`claude,cursor,...`) |
 | `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
@@ -410,7 +440,8 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
-| `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails for AI agents |
+| `enforce` | `--files`, `[--fail-on, --staged, --json]` | Pre-edit blocking guardrail check (exit `0` clean, exit `2` blocked) |
+| `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
 | `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
@@ -439,7 +470,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0009).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0010).
 
 ---
 

@@ -85,4 +85,18 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Rust and Python projects seamlessly match version-dependent failure memories during recall.
   - Reviewers can inspect exact line-by-line drift prior to reaffirmation or re-verification.
 
+---
+
+## ADR-0007: Repository Statistics & Metrics Aggregation Command
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Repository maintainers, CI dashboards, and agents need visibility into overall memory system health: active vs draft scars, current vs stale anchors, monitored symbols, and recorded feedback utility rates.
+- **Decision**:
+  - Implement `git-scars stats` (and `git-scars stats --json`) to aggregate lifecycle distributions, dynamic freshness counts, anchor file/symbol tallies, and feedback satisfaction percentages from local state.
+- **Consequences**:
+  - Provides instant, zero-dependency visibility into repository regression guardrail coverage.
+  - Generates structured JSON output for CI reporting and agent telemetry.
+
+
 

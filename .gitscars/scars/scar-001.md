@@ -1,8 +1,8 @@
 ---
 schema_version: "1"
 id: "scar-001"
-slug: "avoid-unbuffered-channel-deadlock-in-worker-pool"
 title: "Avoid unbuffered channel deadlock in worker pool"
+slug: "avoid-unbuffered-channel-deadlock-in-worker-pool"
 lesson: "Unbuffered task channels cause worker goroutines to block indefinitely under burst load. Always buffer task channels to worker count or pass context cancellation."
 applicability: "Go concurrency pipelines using worker goroutines and unbuffered dispatch channels."
 anchors:
@@ -24,12 +24,13 @@ verifier:
   command_hash: "2d4b1ee683d6be106b1633c27fedb692d3f757a5aa049397e28ef1cbd6d52736"
 baseline:
   recorded_at: "2026-10-11T08:00:00Z"
-  cmd/git-scars/main.go: "f13ec806bb6a1a1c136ded3f870f83b4380685124243f1818132a6410f85e69b"
+  command_hash: "2d4b1ee683d6be106b1633c27fedb692d3f757a5aa049397e28ef1cbd6d52736"
+  cmd/git-scars/main.go: "cb149626b5c9669d2af58656a0affeafaed0e0ff81f554726ab9126187e1cd73"
 review:
   status: "approved"
-  reviewer: "Pavanspoojary"
+  reviewer: "maintainer"
   date: "2026-10-11T08:00:00Z"
-  rationale: "Verified fail-to-pass reproduction with Go race detector"
+  rationale: "Reaffirmed: Updated anchor baseline after adding doctor diagnostic and interactive wizard commands"
 lifecycle:
   state: "active"
 ---

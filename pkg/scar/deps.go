@@ -108,7 +108,105 @@ func ParseNpmLockDependencies(repoRoot string) (map[string]string, error) {
 	return deps, nil
 }
 
-// GetRepoDependencies retrieves all Go and npm dependencies present in the repository root.
+// ParseCargoLockDependencies parses package names and versions from Rust's Cargo.lock.
+func ParseCargoLockDependencies(repoRoot string) (map[string]string, error) {
+	return parseTomlPackageFile(filepath.Join(repoRoot, "Cargo.lock"))
+}
+
+// ParsePoetryLockDependencies parses package names and versions from Python's poetry.lock.
+func ParsePoetryLockDependencies(repoRoot string) (map[string]string, error) {
+	return parseTomlPackageFile(filepath.Join(repoRoot, "poetry.lock"))
+}
+
+// ParsePythonRequirements parses package names and versions from requirements.txt.
+func ParsePythonRequirements(repoRoot string) (map[string]string, error) {
+	path := filepath.Join(repoRoot, "requirements.txt")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]string), nil
+		}
+		return nil, err
+	}
+
+	deps := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-") {
+			continue
+		}
+		if idx := strings.Index(line, "#"); idx != -1 {
+			line = strings.TrimSpace(line[:idx])
+		}
+		var name, ver string
+		for _, op := range []string{"==", ">=", "<=", "~=", "!=", "<", ">"} {
+			if strings.Contains(line, op) {
+				parts := strings.SplitN(line, op, 2)
+				name = strings.TrimSpace(parts[0])
+				ver = strings.TrimSpace(parts[1])
+				break
+			}
+		}
+		if name == "" {
+			name = line
+		}
+		if name != "" {
+			deps[name] = ver
+		}
+	}
+	return deps, scanner.Err()
+}
+
+func parseTomlPackageFile(path string) (map[string]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return make(map[string]string), nil
+		}
+		return nil, err
+	}
+
+	deps := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+
+	var curName, curVer string
+	flush := func() {
+		if curName != "" && curVer != "" {
+			deps[curName] = curVer
+		}
+		curName = ""
+		curVer = ""
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "[[package]]" {
+			flush()
+			continue
+		}
+		if strings.HasPrefix(line, "name =") {
+			curName = extractQuotedString(line)
+		} else if strings.HasPrefix(line, "version =") {
+			curVer = extractQuotedString(line)
+		}
+	}
+	flush()
+
+	return deps, scanner.Err()
+}
+
+func extractQuotedString(line string) string {
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) < 2 {
+		return ""
+	}
+	val := strings.TrimSpace(parts[1])
+	val = strings.Trim(val, `"`)
+	return val
+}
+
+// GetRepoDependencies retrieves all Go, npm, Rust, and Python dependencies present in the repository root.
 func GetRepoDependencies(repoRoot string) map[string]string {
 	combined := make(map[string]string)
 
@@ -119,6 +217,21 @@ func GetRepoDependencies(repoRoot string) map[string]string {
 
 	npmDeps, _ := ParseNpmLockDependencies(repoRoot)
 	for k, v := range npmDeps {
+		combined[k] = v
+	}
+
+	cargoDeps, _ := ParseCargoLockDependencies(repoRoot)
+	for k, v := range cargoDeps {
+		combined[k] = v
+	}
+
+	poetryDeps, _ := ParsePoetryLockDependencies(repoRoot)
+	for k, v := range poetryDeps {
+		combined[k] = v
+	}
+
+	pyReqs, _ := ParsePythonRequirements(repoRoot)
+	for k, v := range pyReqs {
 		combined[k] = v
 	}
 

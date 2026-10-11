@@ -154,3 +154,93 @@ func TestDependencyAnchorScoringInRecall(t *testing.T) {
 		t.Errorf("expected matches to contain dependency(+3), got: %v", scored.Matches)
 	}
 }
+
+func TestParseCargoAndPoetryLockDependencies(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-deps-cargopoetry-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cargoContent := `version = 3
+
+[[package]]
+name = "serde"
+version = "1.0.197"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "tokio"
+version = "1.37.0"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "Cargo.lock"), []byte(cargoContent), 0644); err != nil {
+		t.Fatalf("failed writing Cargo.lock: %v", err)
+	}
+
+	deps, err := ParseCargoLockDependencies(tmpDir)
+	if err != nil {
+		t.Fatalf("ParseCargoLockDependencies failed: %v", err)
+	}
+	if deps["serde"] != "1.0.197" {
+		t.Errorf("expected serde 1.0.197, got %q", deps["serde"])
+	}
+	if deps["tokio"] != "1.37.0" {
+		t.Errorf("expected tokio 1.37.0, got %q", deps["tokio"])
+	}
+
+	poetryContent := `[[package]]
+name = "httpx"
+version = "0.27.0"
+description = "A next-generation HTTP client for Python."
+
+[[package]]
+name = "fastapi"
+version = "0.110.0"
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "poetry.lock"), []byte(poetryContent), 0644); err != nil {
+		t.Fatalf("failed writing poetry.lock: %v", err)
+	}
+
+	pDeps, err := ParsePoetryLockDependencies(tmpDir)
+	if err != nil {
+		t.Fatalf("ParsePoetryLockDependencies failed: %v", err)
+	}
+	if pDeps["httpx"] != "0.27.0" {
+		t.Errorf("expected httpx 0.27.0, got %q", pDeps["httpx"])
+	}
+	if pDeps["fastapi"] != "0.110.0" {
+		t.Errorf("expected fastapi 0.110.0, got %q", pDeps["fastapi"])
+	}
+}
+
+func TestParsePythonRequirements(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-deps-pyreqs-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	reqsContent := `# Core dependencies
+flask==3.0.2
+pydantic>=2.6.0
+gunicorn==21.2.0 # production server
+-r base.txt
+`
+	if err := os.WriteFile(filepath.Join(tmpDir, "requirements.txt"), []byte(reqsContent), 0644); err != nil {
+		t.Fatalf("failed writing requirements.txt: %v", err)
+	}
+
+	deps, err := ParsePythonRequirements(tmpDir)
+	if err != nil {
+		t.Fatalf("ParsePythonRequirements failed: %v", err)
+	}
+	if deps["flask"] != "3.0.2" {
+		t.Errorf("expected flask 3.0.2, got %q", deps["flask"])
+	}
+	if deps["pydantic"] != "2.6.0" {
+		t.Errorf("expected pydantic 2.6.0, got %q", deps["pydantic"])
+	}
+	if deps["gunicorn"] != "21.2.0" {
+		t.Errorf("expected gunicorn 21.2.0, got %q", deps["gunicorn"])
+	}
+}

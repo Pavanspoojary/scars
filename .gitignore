@@ -1,6 +1,7 @@
 # Binaries and build artifacts
 /bin/
 /dist/
+/git-scars
 *.exe
 *.exe~
 *.dll

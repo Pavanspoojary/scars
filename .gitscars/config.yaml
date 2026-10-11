@@ -1,0 +1,4 @@
+# GitScars configuration
+version: 1
+scars_dir: scars
+abstention_threshold: 0.7

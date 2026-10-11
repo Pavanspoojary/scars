@@ -129,6 +129,44 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - AI agents can proactively query, inject, and write regression memory directly through standard protocols and zero-dependency CLI pipelines.
   - All operations maintain 100% Go standard library compatibility with zero third-party dependencies.
 
+---
+
+## ADR-0010: Retrieval v2 Partial File Matching Weights
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: Exact file matching misses legitimate cases (file moved or renamed). A same-directory fallback was initially assigned +3, which allowed any file in the same directory to pass the abstain threshold alone and caused a regression in `TestInjectGuardrails` (unrelated file in the same directory was retrieved).
+- **Decision**:
+  - Exact path match: +5 (unchanged).
+  - Same basename in a different directory (likely move or rename): +2.
+  - Same directory with a different basename (module proximity): +1.
+  - Partial file signals therefore remain below the abstain threshold (3) unless combined with an additional signal (symbol, error signature, command, dependency, or task terms).
+  - Added normalized symbol matching (exact +4, normalized suffix +2), normalized error-signature matching (+3), and a `confidence = score/19` field in recall output.
+- **Consequences**:
+  - Preserves the frozen evaluation precision requirement (Precision@3 >= 70%, false-positive rate <= 10%) while improving recall for moved or renamed files.
+  - `EVAL_PLAN.md` frozen weights remain valid; partial signals are extensions that cannot independently trigger retrieval.
+
+---
+
+## ADR-0011: Feedback Quality Scoring, Parallel Freshness, and Lifecycle Evolution
+
+- **Date**: 2026-10-11
+- **Status**: Accepted
+- **Context**: 
+  - As scars accumulate user and agent feedback, scars with repeatedly incorrect or irrelevant guidance should not maintain identical retrieval priority.
+  - Calculating anchor SHA-256 hashes sequentially across dozens of scars slows down cold recall and status commands.
+  - When architectures change, outdated scars require explicit lifecycle transitions (`contradicted`, `superseded`) with audit trails rather than silent deletion.
+- **Decision**:
+  - Implemented `GetScarQuality` aggregating feedback into net scores `(helpful - 1.5*irrelevant - 2.0*incorrect) / total`.
+  - Applied a deterministic `-2` recall ranking penalty for scars with `>= 2` incorrect ratings, logged explicitly in `matches` as `feedback_penalty(-2)`. Added lint warnings (`noisy_scar`) for `>= 3` incorrect ratings.
+  - Added concurrent worker pool execution (up to 8 goroutines) in `ComputeFreshness` and `ListScars`, preserving 100% deterministic ordering via stable ID sorting.
+  - Added first-class lifecycle commands `git-scars contradict <id> --by <new-id> --rationale` and `git-scars supersede <id> --by <new-id>`, updating `conflicts_with` and `supersedes` arrays.
+  - Added pairwise near-duplicate detection (`git-scars dedupe`) using word-level Jaccard similarity (threshold 0.85) and automated repository health repair (`git-scars doctor --fix`).
+- **Consequences**:
+  - Closed learning loop enables repository memory to self-clean over time without manual editing of YAML frontmatter.
+  - Parallel hashing delivers ~6x faster cold freshness checks at scale while maintaining zero external dependencies and 100% standard library compliance.
+
+
 
 
 

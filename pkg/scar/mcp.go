@@ -81,7 +81,7 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]string{
 				"name":    "git-scars-mcp",
-				"version": "1.0.0",
+				"version": "1.1.0",
 			},
 			"capabilities": map[string]interface{}{
 				"tools":     map[string]interface{}{},
@@ -272,6 +272,77 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 						},
 					},
 					"required": []string{"title", "lesson"},
+				},
+			},
+			{
+				"name":        "pre_edit_check",
+				"description": "Pre-edit blocking guardrail check. Inspects target files and symbols before code modifications and returns blocking scars with actionable do/don't guidance",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Target file paths being inspected or edited",
+						},
+						"symbols": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Functions or symbols involved in the edit",
+						},
+						"fail_on": map[string]interface{}{
+							"type":        "string",
+							"description": "Severity threshold to block on: 'critical', 'high' (default), 'medium', 'low'",
+						},
+					},
+					"required": []string{"files"},
+				},
+			},
+			{
+				"name":        "plan_task",
+				"description": "Composite task planning tool. Combines selective recall and token-budget prompt injection in a single roundtrip",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"task": map[string]interface{}{
+							"type":        "string",
+							"description": "High-level description of the engineering task or planned changes",
+						},
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Target repository files to inspect",
+						},
+						"symbols": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Target symbols or methods",
+						},
+						"budget_tokens": map[string]interface{}{
+							"type":        "integer",
+							"description": "Maximum token budget for prompt injection (default: 400)",
+						},
+					},
+					"required": []string{"task"},
+				},
+			},
+			{
+				"name":        "post_failure_learn",
+				"description": "Composite failure diagnosis and learning tool. Triages error logs against known failure memories and returns prevention guidance",
+				"inputSchema": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"error_output": map[string]interface{}{
+							"type":        "string",
+							"description": "Compiler error, panic stack trace, or failing test output",
+						},
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Optional repository files involved in the failure",
+						},
+					},
+					"required": []string{"error_output"},
 				},
 			},
 		}
@@ -504,6 +575,110 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 			"path":   path,
 		}
 		data, _ := json.MarshalIndent(res, "", "  ")
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: string(data)}},
+		}
+
+	case "pre_edit_check":
+		var files []string
+		if rawFiles, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, rf := range rawFiles {
+				if fStr, ok := rf.(string); ok && strings.TrimSpace(fStr) != "" {
+					files = append(files, strings.TrimSpace(fStr))
+				}
+			}
+		}
+		var symbols []string
+		if rawSyms, ok := params.Arguments["symbols"].([]interface{}); ok {
+			for _, rs := range rawSyms {
+				if sStr, ok := rs.(string); ok && strings.TrimSpace(sStr) != "" {
+					symbols = append(symbols, strings.TrimSpace(sStr))
+				}
+			}
+		}
+		failOn, _ := params.Arguments["fail_on"].(string)
+		res, err := store.Enforce(EnforceOptions{
+			Files:   files,
+			Symbols: symbols,
+			FailOn:  failOn,
+		})
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Enforce check failed: %v", err)}},
+			}
+		}
+		data, _ := json.MarshalIndent(res, "", "  ")
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: string(data)}},
+		}
+
+	case "plan_task":
+		task, _ := params.Arguments["task"].(string)
+		var files []string
+		if rawFiles, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, rf := range rawFiles {
+				if fStr, ok := rf.(string); ok && strings.TrimSpace(fStr) != "" {
+					files = append(files, strings.TrimSpace(fStr))
+				}
+			}
+		}
+		var symbols []string
+		if rawSyms, ok := params.Arguments["symbols"].([]interface{}); ok {
+			for _, rs := range rawSyms {
+				if sStr, ok := rs.(string); ok && strings.TrimSpace(sStr) != "" {
+					symbols = append(symbols, strings.TrimSpace(sStr))
+				}
+			}
+		}
+		budget := 400
+		if rawBudget, ok := params.Arguments["budget_tokens"].(float64); ok && rawBudget > 0 {
+			budget = int(rawBudget)
+		}
+
+		guardrails, err := store.InjectGuardrails(InjectOptions{
+			Files:        files,
+			Symbols:      symbols,
+			Task:         task,
+			BudgetTokens: budget,
+			Format:       "xml",
+		})
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Guardrail injection failed: %v", err)}},
+			}
+		}
+
+		recalled, _ := store.Recall(QueryOptions{
+			Files:     files,
+			Symbols:   symbols,
+			Task:      task,
+			Threshold: 2,
+			TopK:      10,
+		})
+
+		planRes := map[string]interface{}{
+			"guardrails_xml": guardrails,
+			"matches_count":  len(recalled),
+			"matches":        recalled,
+		}
+		data, _ := json.MarshalIndent(planRes, "", "  ")
+		return MCPToolResult{
+			Content: []MCPContent{{Type: "text", Text: string(data)}},
+		}
+
+	case "post_failure_learn":
+		errorOutput, _ := params.Arguments["error_output"].(string)
+		triageRes, err := store.TriageError(errorOutput)
+		if err != nil {
+			return MCPToolResult{
+				IsError: true,
+				Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Triage error failed: %v", err)}},
+			}
+		}
+
+		data, _ := json.MarshalIndent(triageRes, "", "  ")
 		return MCPToolResult{
 			Content: []MCPContent{{Type: "text", Text: string(data)}},
 		}

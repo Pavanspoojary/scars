@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
@@ -15,7 +16,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.0.0"
+const version = "1.1.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -35,7 +36,9 @@ func run(args []string) error {
 
 	switch args[0] {
 	case "init":
-		return runInit(store)
+		return runInit(store, args[1:])
+	case "enforce":
+		return runEnforce(store, args[1:])
 	case "add":
 		return runAdd(store, args[1:])
 	case "list":
@@ -58,6 +61,12 @@ func run(args []string) error {
 		return runRetire(store, args[1:])
 	case "reaffirm":
 		return runReaffirm(store, args[1:])
+	case "contradict":
+		return runContradict(store, args[1:])
+	case "supersede":
+		return runSupersede(store, args[1:])
+	case "dedupe":
+		return runDedupe(store, args[1:])
 	case "mcp":
 		return store.ServeMCP(os.Stdin, os.Stdout)
 	case "hook":
@@ -95,22 +104,26 @@ Usage:
   git-scars <command> [arguments]
 
 Lifecycle Commands:
-  init            Initialize .gitscars/ repository metadata and config
+  init            Initialize .gitscars/ repository metadata and config (--agent)
   add             Create a new scar draft (interactive -i or --title/--lesson/--files)
   list            List recorded scars with lifecycle, review, and dynamic freshness
   show <id>       Display full metadata and lesson for a scar
   diff <id>       Show diff between anchor files and recorded baseline
   promote <id>    Promote a scar to active state (enforces review & verifier invariants)
   reaffirm <id>   Reaffirm a scar after anchor code drift with human rationale
+  contradict <id> Transition scar to contradicted state (--by <new-id>, --rationale)
+  supersede <id>  Supersede scar with successor scar (--by <new-id>)
   retire <id>     Retire a scar that is no longer applicable
   verify <id>     Execute verifier with safety checks and record evidence
   recall          Retrieve relevant scars (--files, --diff, --stdin, --json)
+  enforce         Pre-edit blocking guardrail check (--files, --fail-on, --staged)
   inject          Generate token-budgeted prompt guardrails for AI agents
   sync            Synchronize active scars into AGENTS.md / CLAUDE.md
   triage          Diagnose test failures and panic traces against scars (--error/stdin)
+  dedupe          Detect duplicate and near-duplicate scars (--min, --dry-run, --json)
   check           Read-only verification of scar freshness and invariants
   lint            Audit scars for security, wildcards, and schema validity
-  doctor          Run repository diagnostics and health checks (--json)
+  doctor          Run repository diagnostics and health checks (--json, --fix)
   stats           Display repository metrics and feedback statistics (--json)
   index           Rebuild .gitscars/.local/index.json fast cache
   hook            Manage Git pre-commit hook (install, uninstall, status)
@@ -143,11 +156,28 @@ func findRepoRoot() string {
 	return dir
 }
 
-func runInit(store *scar.Store) error {
+func runInit(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	agent := fs.String("agent", "", "Optional comma-separated agent configuration targets (claude, cursor, zed, antigravity)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	if err := store.Init(); err != nil {
 		return fmt.Errorf("initialization failed: %w", err)
 	}
 	fmt.Printf("Initialized GitScars in %s/.gitscars\n", store.RepoRoot)
+
+	if *agent != "" {
+		for _, a := range strings.Split(*agent, ",") {
+			a = strings.ToLower(strings.TrimSpace(a))
+			if err := scaffoldAgent(store.RepoRoot, a); err != nil {
+				fmt.Printf("warning: failed configuring agent %s: %v\n", a, err)
+			} else {
+				fmt.Printf("Configured %s integration files successfully.\n", a)
+			}
+		}
+	}
 	return nil
 }
 
@@ -319,6 +349,10 @@ func runShow(store *scar.Store, args []string) error {
 	if len(s.Anchors.Symbols) > 0 {
 		fmt.Printf("Anchored Symbols: %s\n", strings.Join(s.Anchors.Symbols, ", "))
 	}
+	if q, err := store.GetScarQuality(s.ID); err == nil && q.Total > 0 {
+		fmt.Printf("Feedback Quality: Score %.2f (Helpful: %d, Irrelevant: %d, Incorrect: %d, Total: %d)\n",
+			q.Score, q.Helpful, q.Irrelevant, q.Incorrect, q.Total)
+	}
 	fmt.Printf("\n--- Lesson ---\n%s\n", s.Lesson)
 	return nil
 }
@@ -403,6 +437,95 @@ func runReaffirm(store *scar.Store, args []string) error {
 
 	fmt.Printf("Reaffirmed scar %s by %s. Anchor baseline updated to current tree.\n", reaffirmed.ID, *reviewer)
 	return nil
+}
+
+func runContradict(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("contradict", flag.ContinueOnError)
+	by := fs.String("by", "", "Successor or conflicting scar ID")
+	rationale := fs.String("rationale", "", "Rationale explaining why this scar is contradicted")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars contradict <id> --by <new-id> [--rationale <reason>]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	if *by == "" {
+		return fmt.Errorf("contradict requires --by <new-id>")
+	}
+
+	scar, err := store.ContradictScar(id, *by, *rationale)
+	if err != nil {
+		return fmt.Errorf("failed contradicting scar %s: %w", id, err)
+	}
+
+	fmt.Printf("Successfully transitioned scar %s to state %q (conflicts with %s)\n", scar.ID, scar.Lifecycle.State, *by)
+	return nil
+}
+
+func runSupersede(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("supersede", flag.ContinueOnError)
+	by := fs.String("by", "", "Successor scar ID that supersedes this scar")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars supersede <old-id> --by <new-id>")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	if *by == "" {
+		return fmt.Errorf("supersede requires --by <new-id>")
+	}
+
+	scar, err := store.SupersedeScar(id, *by)
+	if err != nil {
+		return fmt.Errorf("failed superseding scar %s: %w", id, err)
+	}
+
+	fmt.Printf("Successfully superseded scar %s by successor %s (state: %q)\n", scar.ID, *by, scar.Lifecycle.State)
+	return nil
+}
+
+func runDedupe(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("dedupe", flag.ContinueOnError)
+	minSim := fs.Float64("min", 0.85, "Minimum Jaccard lexical similarity threshold (0.0 - 1.0)")
+	dryRun := fs.Bool("dry-run", true, "Perform dry-run inspection without altering scar records")
+	jsonOut := fs.Bool("json", false, "Output duplicate candidate pairs in JSON")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	candidates, err := store.FindDuplicates(*minSim)
+	if err != nil {
+		return fmt.Errorf("failed analyzing duplicate scars: %w", err)
+	}
+
+	if *jsonOut {
+		data, err := json.MarshalIndent(candidates, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		return nil
+	}
+
+	if len(candidates) == 0 {
+		fmt.Printf("No duplicate or near-duplicate scars found (threshold: %.2f).\n", *minSim)
+		return nil
+	}
+
+	fmt.Printf("Discovered %d candidate duplicate pair(s) (threshold: %.2f, dry-run: %v):\n\n", len(candidates), *minSim, *dryRun)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
+	fmt.Fprintln(w, "SIMILARITY\tSCAR A\tSCAR B\tRECOMMENDED ACTION")
+	for _, c := range candidates {
+		fmt.Fprintf(w, "%.2f\t%s\t%s\t%s\n", c.Similarity, c.ScarA.ID, c.ScarB.ID, c.Suggestion)
+	}
+	return w.Flush()
 }
 
 func runRecall(store *scar.Store, args []string) error {
@@ -557,6 +680,20 @@ func runLint(store *scar.Store, args []string) error {
 
 	crossFindings := scar.LintCollection(allScars)
 	allFindings = append(allFindings, crossFindings...)
+
+	qualities, _ := store.GetAllScarQualities()
+	if qualities != nil {
+		for _, s := range allScars {
+			if q, ok := qualities[s.ID]; ok && q.Incorrect >= 3 {
+				allFindings = append(allFindings, scar.LintFinding{
+					ScarID:   s.ID,
+					Severity: "WARNING",
+					Rule:     "noisy_scar",
+					Message:  fmt.Sprintf("scar has accumulated %d incorrect feedback ratings; consider updating anchors, superseding, or retiring", q.Incorrect),
+				})
+			}
+		}
+	}
 
 	if len(allFindings) == 0 {
 		fmt.Printf("Lint clean: %d scars audited with zero findings.\n", len(allScars))
@@ -727,20 +864,42 @@ func runStats(store *scar.Store, args []string) error {
 }
 
 func runDoctor(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "Output diagnostic report in JSON")
+	fix := fs.Bool("fix", false, "Automatically repair recoverable configuration, cache, and hook issues")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	if *fix {
+		actions, err := store.FixDoctor()
+		if err != nil {
+			return fmt.Errorf("doctor --fix error: %w", err)
+		}
+		if len(actions) == 0 {
+			fmt.Println("No automated repairs required.")
+		} else {
+			fmt.Println("Applied automated repairs:")
+			for _, act := range actions {
+				fmt.Printf("  ✓ %s\n", act)
+			}
+			fmt.Println()
+		}
+	}
+
 	report := store.RunDoctor()
 
-	for _, a := range args {
-		if a == "--json" {
-			data, err := json.MarshalIndent(report, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(data))
-			if !report.Healthy {
-				return fmt.Errorf("doctor detected %d diagnostic failure(s)", report.Errors)
-			}
-			return nil
+	if *jsonOut {
+		data, err := json.MarshalIndent(report, "", "  ")
+		if err != nil {
+			return err
 		}
+		fmt.Println(string(data))
+		if !report.Healthy {
+			return fmt.Errorf("doctor detected %d diagnostic failure(s)", report.Errors)
+		}
+		return nil
 	}
 
 	fmt.Println("=== GitScars System Diagnostics ===")
@@ -919,4 +1078,172 @@ func runTriage(store *scar.Store, args []string) error {
 	}
 
 	return nil
+}
+
+func runEnforce(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("enforce", flag.ContinueOnError)
+	filesStr := fs.String("files", "", "Comma-separated target file paths")
+	symbolsStr := fs.String("symbols", "", "Comma-separated target symbols")
+	failOn := fs.String("fail-on", "high", "Failure threshold severity: critical, high, medium, low")
+	staged := fs.Bool("staged", false, "Automatically inspect staged files from git diff --cached")
+	asJSON := fs.Bool("json", false, "Output result in JSON format")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	var files []string
+	if *filesStr != "" {
+		for _, f := range strings.Split(*filesStr, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				files = append(files, f)
+			}
+		}
+	}
+
+	if *staged && scar.GitAvailable(store.RepoRoot) {
+		cmd := exec.Command("git", "diff", "--cached", "--name-only")
+		cmd.Dir = store.RepoRoot
+		out, err := cmd.Output()
+		if err == nil {
+			for _, line := range strings.Split(string(out), "\n") {
+				if line = strings.TrimSpace(line); line != "" {
+					files = append(files, line)
+				}
+			}
+		}
+	}
+
+	var symbols []string
+	if *symbolsStr != "" {
+		for _, s := range strings.Split(*symbolsStr, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				symbols = append(symbols, s)
+			}
+		}
+	}
+
+	res, err := store.Enforce(scar.EnforceOptions{
+		Files:   files,
+		Symbols: symbols,
+		FailOn:  *failOn,
+	})
+	if err != nil {
+		return err
+	}
+
+	if *asJSON {
+		data, err := json.MarshalIndent(res, "", "  ")
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(data))
+		if res.Blocked {
+			os.Exit(2)
+		}
+		return nil
+	}
+
+	if !res.Blocked {
+		fmt.Println("clean: no blocking regression scars detected")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stderr, "=== [GUARDRAIL BLOCKED] Pre-Edit Safety Check Failed ===\n")
+	fmt.Fprintf(os.Stderr, "%s\n\n", res.Reason)
+	for i, sc := range res.BlockingScars {
+		s := sc.Scar
+		sev := s.Severity
+		if sev == "" {
+			sev = scar.SeverityMedium
+		}
+		fmt.Fprintf(os.Stderr, "[%d] %s (%s severity | Score: %d | Confidence: %.2f)\n", i+1, s.ID, sev, sc.Score, sc.Confidence)
+		fmt.Fprintf(os.Stderr, "    Title:  %s\n", s.Title)
+		fmt.Fprintf(os.Stderr, "    Lesson: %s\n", s.Lesson)
+		if s.FixHint != "" {
+			fmt.Fprintf(os.Stderr, "    Hint:   %s\n", s.FixHint)
+		}
+		if s.BadPattern != "" {
+			fmt.Fprintf(os.Stderr, "    Don't:  %s\n", s.BadPattern)
+		}
+		if s.GoodPattern != "" {
+			fmt.Fprintf(os.Stderr, "    Do:     %s\n", s.GoodPattern)
+		}
+		if len(s.Verifier.Argv) > 0 {
+			fmt.Fprintf(os.Stderr, "    Verify: %s\n", strings.Join(s.Verifier.Argv, " "))
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+	os.Exit(2)
+	return nil
+}
+
+func scaffoldAgent(repoRoot, agent string) error {
+	switch agent {
+	case "claude":
+		dir := filepath.Join(repoRoot, ".claude")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		mcpPath := filepath.Join(dir, "mcp.json")
+		content := `{
+  "mcpServers": {
+    "git-scars": {
+      "command": "git-scars",
+      "args": ["mcp"]
+    }
+  }
+}
+`
+		return os.WriteFile(mcpPath, []byte(content), 0644)
+	case "cursor":
+		dir := filepath.Join(repoRoot, ".cursor", "rules")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		rulePath := filepath.Join(dir, "git-scars.mdc")
+		content := `---
+description: GitScars regression guardrails
+globs: *
+alwaysApply: true
+---
+Before editing code files, execute:
+git-scars enforce --files "<file1,file2>" --fail-on high
+
+If tests or builds fail, execute:
+git-scars triage --error "<error_text>"
+`
+		return os.WriteFile(rulePath, []byte(content), 0644)
+	case "zed":
+		dir := filepath.Join(repoRoot, ".zed")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		path := filepath.Join(dir, "settings.json")
+		content := `{
+  "context_servers": [
+    {
+      "id": "git-scars",
+      "command": {
+        "path": "git-scars",
+        "args": ["mcp"]
+      }
+    }
+  ]
+}
+`
+		return os.WriteFile(path, []byte(content), 0644)
+	case "antigravity":
+		dir := filepath.Join(repoRoot, ".gemini", "config", "rules")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		path := filepath.Join(dir, "git-scars.md")
+		content := `# GitScars Regression Guardrail Policy
+Before modifying repository code, query active guardrails:
+` + "```bash\n" + `git-scars enforce --files "<target_files>" --fail-on high` + "\n```\n"
+		return os.WriteFile(path, []byte(content), 0644)
+	default:
+		return fmt.Errorf("unsupported agent target: %s (supported: claude, cursor, zed, antigravity)", agent)
+	}
 }

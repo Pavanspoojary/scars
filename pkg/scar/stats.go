@@ -2,16 +2,17 @@ package scar
 
 // RepoStats summarizes health and metrics of all scars in the repository.
 type RepoStats struct {
-	TotalScars      int            `json:"total_scars"`
-	LifecycleCounts map[string]int `json:"lifecycle_counts"`
-	FreshnessCounts map[string]int `json:"freshness_counts"`
-	ReviewCounts    map[string]int `json:"review_counts"`
-	TotalFiles      int            `json:"total_files_anchored"`
-	TotalSymbols    int            `json:"total_symbols_anchored"`
-	TotalErrors     int            `json:"total_error_signatures"`
-	FeedbackTotal   int            `json:"feedback_total"`
-	FeedbackHelpful int            `json:"feedback_helpful"`
-	HelpfulRatio    float64        `json:"helpful_ratio"`
+	TotalScars      int                           `json:"total_scars"`
+	LifecycleCounts map[string]int                `json:"lifecycle_counts"`
+	FreshnessCounts map[string]int                `json:"freshness_counts"`
+	ReviewCounts    map[string]int                `json:"review_counts"`
+	TotalFiles      int                           `json:"total_files_anchored"`
+	TotalSymbols    int                           `json:"total_symbols_anchored"`
+	TotalErrors     int                           `json:"total_error_signatures"`
+	FeedbackTotal   int                           `json:"feedback_total"`
+	FeedbackHelpful int                           `json:"feedback_helpful"`
+	HelpfulRatio    float64                       `json:"helpful_ratio"`
+	ScarQualities   map[string]ScarQualitySummary `json:"scar_qualities,omitempty"`
 }
 
 // GetStats compiles health metrics across all scars and recorded feedback.
@@ -62,6 +63,11 @@ func (s *Store) GetStats() (*RepoStats, error) {
 	}
 	if stats.FeedbackTotal > 0 {
 		stats.HelpfulRatio = float64(stats.FeedbackHelpful) / float64(stats.FeedbackTotal) * 100.0
+	}
+
+	qualities, _ := s.GetAllScarQualities()
+	if len(qualities) > 0 {
+		stats.ScarQualities = qualities
 	}
 
 	return stats, nil

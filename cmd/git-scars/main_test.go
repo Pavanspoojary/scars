@@ -255,4 +255,59 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"triage", "--error", "panic: deadlock in pkg/worker.go", "--json"}); err != nil {
 		t.Fatalf("triage --json command failed: %v", err)
 	}
+
+	// 15. Enforce command on clean file
+	if err := run([]string{"enforce", "--files", "pkg/clean.go"}); err != nil {
+		t.Fatalf("enforce command failed on clean file: %v", err)
+	}
+
+	// 16. Init agent onboarding
+	if err := run([]string{"init", "--agent", "claude,cursor,zed,antigravity"}); err != nil {
+		t.Fatalf("init with agent flag failed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".claude", "mcp.json")); os.IsNotExist(err) {
+		t.Errorf("expected .claude/mcp.json to exist")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".cursor", "rules", "git-scars.mdc")); os.IsNotExist(err) {
+		t.Errorf("expected .cursor/rules/git-scars.mdc to exist")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".zed", "settings.json")); os.IsNotExist(err) {
+		t.Errorf("expected .zed/settings.json to exist")
+	}
+	if _, err := os.Stat(filepath.Join(tmpDir, ".gemini", "config", "rules", "git-scars.md")); os.IsNotExist(err) {
+		t.Errorf("expected .gemini/config/rules/git-scars.md to exist")
+	}
+
+	// 17. Dedupe command (dry-run and json)
+	if err := run([]string{"dedupe", "--dry-run"}); err != nil {
+		t.Fatalf("dedupe dry-run failed: %v", err)
+	}
+	if err := run([]string{"dedupe", "--json"}); err != nil {
+		t.Fatalf("dedupe --json failed: %v", err)
+	}
+
+	// 18. Doctor --fix command
+	if err := run([]string{"doctor", "--fix"}); err != nil {
+		t.Fatalf("doctor --fix failed: %v", err)
+	}
+
+	// 19. Contradict command
+	// Add another scar to contradict with
+	_ = run([]string{"add", "--title", "Refined Lock", "--lesson", "Use try-lock", "--files", "pkg/lock.go"})
+	newScars, _ := store.ListScars()
+	var newID string
+	for _, ns := range newScars {
+		if ns.Scar.ID != s.ID {
+			newID = ns.Scar.ID
+			break
+		}
+	}
+	if err := run([]string{"contradict", s.ID, "--by", newID, "--rationale", "Refined lock mechanism"}); err != nil {
+		t.Fatalf("contradict failed: %v", err)
+	}
+
+	// 20. Supersede command
+	if err := run([]string{"supersede", s.ID, "--by", newID}); err != nil {
+		t.Fatalf("supersede failed: %v", err)
+	}
 }

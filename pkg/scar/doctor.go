@@ -178,3 +178,46 @@ func (s *Store) RunDoctor() *DoctorReport {
 
 	return report
 }
+
+// FixDoctor automatically repairs recoverable repository health issues.
+func (s *Store) FixDoctor() ([]string, error) {
+	var actions []string
+
+	// 1. Ensure local directory exists
+	if err := os.MkdirAll(s.LocalDir, 0755); err != nil {
+		return actions, fmt.Errorf("failed creating %s: %w", s.LocalDir, err)
+	}
+	actions = append(actions, fmt.Sprintf("ensured local directory exists at %s", s.LocalDir))
+
+	// 2. Ensure .gitscars/.gitignore ignores .local/
+	gitignorePath := filepath.Join(s.RepoRoot, DefaultStoreDir, ".gitignore")
+	var gitignoreContent string
+	data, err := os.ReadFile(gitignorePath)
+	if err == nil {
+		gitignoreContent = string(data)
+	}
+	if !strings.Contains(gitignoreContent, ".local/") {
+		newContent := strings.TrimRight(gitignoreContent, "\n") + "\n.local/\n"
+		if err := os.WriteFile(gitignorePath, []byte(strings.TrimLeft(newContent, "\n")), 0644); err == nil {
+			actions = append(actions, "updated .gitscars/.gitignore to ignore .local/")
+		}
+	}
+
+	// 3. Rebuild fast index cache
+	if _, err := s.RebuildIndex(); err != nil {
+		return actions, fmt.Errorf("failed rebuilding index cache: %w", err)
+	}
+	actions = append(actions, "rebuilt fast index cache .local/index.json")
+
+	// 4. Install pre-commit hook if git worktree present and hook missing
+	gitDir := filepath.Join(s.RepoRoot, ".git")
+	if info, err := os.Stat(gitDir); err == nil && info.IsDir() {
+		if !IsHookInstalled(s.RepoRoot) {
+			if err := InstallPreCommitHook(s.RepoRoot); err == nil {
+				actions = append(actions, "installed Git pre-commit guardrail hook")
+			}
+		}
+	}
+
+	return actions, nil
+}

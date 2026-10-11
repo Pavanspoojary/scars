@@ -177,7 +177,13 @@ git-scars sync --targets AGENTS.md,CLAUDE.md
 *Manages a deterministic markdown table between `<!-- GIT-SCARS:START -->` and `<!-- GIT-SCARS:END -->` markers, preserving all external prompt rules.*
 
 ### 8. Instant Failure & Test Triage
-Diagnose raw compiler errors, panic stack traces, or test failures directly against recorded regression wisdom:
+Diagnose raw compiler errors, panic stack traces, or test failures directly against recorded regression wisdom across multiple languages:
+- **Go**: `panic:`, `fatal error: all goroutines asleep - deadlock`, `--- FAIL:`, race detector warnings, and runtime file/line locations.
+- **Python**: `Traceback (most recent call last)`, `File "...", line N, in func`, `AssertionError`.
+- **JavaScript & TypeScript**: V8 stack traces `at func (file:line:col)`, `Error:`, `TypeError`.
+- **Rust**: `thread '...' panicked at '...'`, source locations `src/file.rs:N`.
+- **Generic / Runners**: Memory faults (`Segmentation fault`), test framework failures, and race reports.
+
 ```bash
 # Pipe failing test output directly to triage
 go test ./... 2>&1 | git-scars triage
@@ -235,7 +241,7 @@ git-scars stats
 git-scars stats --json
 ```
 
-### 13. Run Full Diagnostics
+### 13. Run Full Diagnostics & Automated Repair
 Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
@@ -243,6 +249,29 @@ git-scars doctor
 
 # Machine-readable JSON report for CI pipelines
 git-scars doctor --json
+
+# Automatically repair recoverable cache, local directory, and hook configurations
+git-scars doctor --fix
+```
+
+### 14. Lifecycle Contradiction & Supersession
+Manage evolution of failure memories as codebase architectures and best practices evolve:
+```bash
+# Contradict an outdated scar with documented rationale and conflict reference
+git-scars contradict scar-001 --by scar-005 --rationale "Worker pool refactored to context cancellation"
+
+# Supersede an obsolete scar by a successor scar
+git-scars supersede scar-001 --by scar-005
+```
+
+### 15. Near-Duplicate Scar Detection
+Inspect active repository scars for semantic and lexical duplication using token-level Jaccard similarity:
+```bash
+# Dry-run near-duplicate audit (default threshold: 0.85)
+git-scars dedupe --dry-run
+
+# Custom similarity threshold and machine-readable JSON
+git-scars dedupe --min 0.75 --json
 ```
 
 ---
@@ -258,6 +287,10 @@ id: "map-write-crash-391945"
 slug: "concurrent-map-write-in-telemetry-exporter"
 title: "Concurrent map write in telemetry exporter"
 lesson: "Metrics map must be protected by sync.RWMutex during RecordMetric calls."
+severity: "high"
+fix_hint: "Wrap map mutations in mu.Lock() or replace with sync.Map"
+bad_pattern: "m[key] = val"
+good_pattern: "mu.Lock(); m[key] = val; mu.Unlock()"
 applicability: "Telemetry exporters handling concurrent metrics emissions."
 anchors:
   files:
@@ -309,13 +342,18 @@ git-scars mcp
 
 The MCP server exposes rich two-way tools and resources for AI coding agents:
 
-#### Tools:
+#### Standard Tools:
 - `list_scars`: List all repository scars with their lifecycle and dynamic freshness status.
 - `get_scar`: Retrieve full frontmatter, anchors, verifier results, and markdown body by scar ID.
 - `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, and commands.
 - `inject_guardrails`: Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files.
 - `triage_error`: Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars.
 - `draft_scar`: Autonomously record a new failure memory draft into repository Git memory.
+
+#### Composite Tools (Single-Roundtrip Workflow):
+- `pre_edit_check`: Pre-edit blocking guardrail check. Inspects target files and symbols before file modifications and returns blocking scars with actionable do/don't patterns and verification commands.
+- `plan_task`: Combines selective recall and token-budget prompt injection into a single roundtrip for task planning.
+- `post_failure_learn`: Multi-language failure triage and diagnostic learning in a single roundtrip, returning prevention lessons for test errors or stack traces.
 
 #### Resources:
 - `scar://<id>`: Read individual scar frontmatter and prevention lessons directly as MCP resources.
@@ -370,6 +408,7 @@ Output:
       "title": "Concurrent map write in telemetry exporter",
       "lesson": "Metrics map must be protected by sync.RWMutex during RecordMetric calls.",
       "score": 5,
+      "confidence": 0.26,
       "freshness": "current",
       "matches": ["file(+5)"],
       "explanation": "file(+5)",
@@ -378,6 +417,32 @@ Output:
   ]
 }
 ```
+
+### 3. Pre-Edit Guardrail Enforcement (`git-scars enforce`)
+
+Prevent AI coding agents and developers from re-introducing known regressions before files are modified:
+
+```bash
+# Check files before editing; returns exit code 2 if a high-severity guardrail matches
+git-scars enforce --files "pkg/worker.go" --fail-on high
+```
+
+Exit Codes:
+- `0`: Clean (no blocking guardrails detected).
+- `2`: Blocked (blocking guardrail detected; outputs actionable `<dont>`, `<do>`, and verification instructions to stderr).
+
+Machine JSON Output:
+```bash
+git-scars enforce --files "pkg/worker.go" --json
+```
+
+### 4. Zero-Friction Agent Onboarding (`git-scars init --agent`)
+
+Configure coding assistants with a single setup command:
+```bash
+git-scars init --agent claude,cursor,zed,antigravity
+```
+Automatically scaffolds `.claude/mcp.json`, `.cursor/rules/git-scars.mdc`, `.zed/settings.json`, and `.gemini/config/rules/git-scars.md`.
 
 ---
 
@@ -398,7 +463,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
-| `init` | none | Initialize `.gitscars/` repository metadata and default config |
+| `init` | `[--agent <targets>]` | Initialize `.gitscars/` repository and optional agent configs (`claude,cursor,...`) |
 | `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
@@ -407,14 +472,18 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `promote` | `<id> --status active` | Promote a scar to active state (enforces review & verifier invariants) |
 | `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence |
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
+| `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
+| `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
 | `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
-| `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails for AI agents |
+| `enforce` | `--files`, `[--fail-on, --staged, --json]` | Pre-edit blocking guardrail check (exit `0` clean, exit `2` blocked) |
+| `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
 | `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
+| `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
 | `check` | `[--diff <ref>]` | Read-only verification of scar freshness and invariants |
-| `lint` | none | Security and schema audit (checks traversal, injections, duplicate titles) |
-| `doctor` | `[--json]` | Run repository diagnostics across Git, store, schemas, invariants, drift, hooks, and index |
+| `lint` | none | Security and schema audit (checks traversal, injections, noisy scars) |
+| `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |
@@ -438,7 +507,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0009).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0010).
 
 ---
 

@@ -116,6 +116,14 @@ func parseYAMLMap(lines []string, s *Scar) error {
 				s.Title = unquoteVal(val)
 			case "lesson":
 				s.Lesson = unquoteVal(val)
+			case "severity":
+				s.Severity = unquoteVal(val)
+			case "fix_hint":
+				s.FixHint = unquoteVal(val)
+			case "bad_pattern":
+				s.BadPattern = unquoteVal(val)
+			case "good_pattern":
+				s.GoodPattern = unquoteVal(val)
 			case "applicability":
 				s.Applicability = unquoteVal(val)
 			case "base_commit":
@@ -259,6 +267,18 @@ func FormatFrontmatter(s *Scar) ([]byte, error) {
 	if s.Lesson != "" {
 		buf.WriteString(fmt.Sprintf("lesson: %s\n", strconv.Quote(s.Lesson)))
 	}
+	if s.Severity != "" {
+		buf.WriteString(fmt.Sprintf("severity: %s\n", strconv.Quote(s.Severity)))
+	}
+	if s.FixHint != "" {
+		buf.WriteString(fmt.Sprintf("fix_hint: %s\n", strconv.Quote(s.FixHint)))
+	}
+	if s.BadPattern != "" {
+		buf.WriteString(fmt.Sprintf("bad_pattern: %s\n", strconv.Quote(s.BadPattern)))
+	}
+	if s.GoodPattern != "" {
+		buf.WriteString(fmt.Sprintf("good_pattern: %s\n", strconv.Quote(s.GoodPattern)))
+	}
 	if s.Applicability != "" {
 		buf.WriteString(fmt.Sprintf("applicability: %s\n", strconv.Quote(s.Applicability)))
 	}
@@ -355,6 +375,18 @@ func FormatFrontmatter(s *Scar) ([]byte, error) {
 	}
 	if s.Lifecycle.SupersededBy != "" {
 		buf.WriteString(fmt.Sprintf("  superseded_by: %s\n", strconv.Quote(s.Lifecycle.SupersededBy)))
+	}
+	if len(s.Lifecycle.ConflictsWith) > 0 {
+		buf.WriteString("  conflicts_with:\n")
+		for _, c := range s.Lifecycle.ConflictsWith {
+			buf.WriteString(fmt.Sprintf("    - %s\n", strconv.Quote(c)))
+		}
+	}
+	if len(s.Lifecycle.Supersedes) > 0 {
+		buf.WriteString("  supersedes:\n")
+		for _, sup := range s.Lifecycle.Supersedes {
+			buf.WriteString(fmt.Sprintf("    - %s\n", strconv.Quote(sup)))
+		}
 	}
 
 	buf.WriteString("---\n\n")

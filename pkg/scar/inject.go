@@ -3,6 +3,7 @@ package scar
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 )
 
@@ -22,6 +23,21 @@ func EstimateTokens(text string) int {
 		return 0
 	}
 	return int(math.Ceil(float64(len(text)) / 4.0))
+}
+
+func severityRank(sev string) int {
+	switch strings.ToLower(sev) {
+	case SeverityCritical:
+		return 9
+	case SeverityHigh:
+		return 6
+	case SeverityMedium:
+		return 3
+	case SeverityLow:
+		return 1
+	default:
+		return 3
+	}
 }
 
 // InjectGuardrails generates a token-budgeted prompt snippet of relevant scars for AI agents.
@@ -54,6 +70,16 @@ func (s *Store) InjectGuardrails(opts InjectOptions) (string, error) {
 		return "", nil // abstain cleanly with zero tokens
 	}
 
+	// Rank by effective score (score*10 + severity weight)
+	sort.SliceStable(scored, func(i, j int) bool {
+		effI := scored[i].Score*10 + severityRank(scored[i].Scar.Severity)
+		effJ := scored[j].Score*10 + severityRank(scored[j].Scar.Severity)
+		if effI != effJ {
+			return effI > effJ
+		}
+		return scored[i].Scar.ID < scored[j].Scar.ID
+	})
+
 	if format == "markdown" {
 		return formatMarkdownInjection(scored, budget), nil
 	}
@@ -71,10 +97,27 @@ func formatXMLInjection(scored []ScoredScar, budgetTokens int) string {
 		filesAttr := strings.Join(scar.Anchors.Files, ", ")
 		symbolsAttr := strings.Join(scar.Anchors.Symbols, ", ")
 
+		sev := scar.Severity
+		if sev == "" {
+			sev = SeverityMedium
+		}
+
 		var entry strings.Builder
-		entry.WriteString(fmt.Sprintf("  <scar id=%q score=%q>\n", scar.ID, fmt.Sprintf("%d", sc.Score)))
+		entry.WriteString(fmt.Sprintf("  <scar id=%q score=%q severity=%q confidence=\"%.2f\">\n", scar.ID, fmt.Sprintf("%d", sc.Score), sev, sc.Confidence))
 		entry.WriteString(fmt.Sprintf("    <title>%s</title>\n", escapeXML(scar.Title)))
 		entry.WriteString(fmt.Sprintf("    <lesson>%s</lesson>\n", escapeXML(scar.Lesson)))
+		if scar.FixHint != "" {
+			entry.WriteString(fmt.Sprintf("    <fix_hint>%s</fix_hint>\n", escapeXML(scar.FixHint)))
+		}
+		if scar.BadPattern != "" {
+			entry.WriteString(fmt.Sprintf("    <dont>%s</dont>\n", escapeXML(scar.BadPattern)))
+		}
+		if scar.GoodPattern != "" {
+			entry.WriteString(fmt.Sprintf("    <do>%s</do>\n", escapeXML(scar.GoodPattern)))
+		}
+		if len(scar.Verifier.Argv) > 0 {
+			entry.WriteString(fmt.Sprintf("    <verify>%s</verify>\n", escapeXML(strings.Join(scar.Verifier.Argv, " "))))
+		}
 		if scar.Applicability != "" {
 			entry.WriteString(fmt.Sprintf("    <applicability>%s</applicability>\n", escapeXML(scar.Applicability)))
 		}
@@ -124,6 +167,18 @@ func formatMarkdownInjection(scored []ScoredScar, budgetTokens int) string {
 			anchorInfo = fmt.Sprintf(" (%s)", strings.Join(scar.Anchors.Files, ", "))
 		}
 		entry.WriteString(fmt.Sprintf("- **%s**%s: %s", scar.ID, anchorInfo, scar.Lesson))
+		if scar.FixHint != "" {
+			entry.WriteString(fmt.Sprintf("\n  *Fix Hint*: %s", scar.FixHint))
+		}
+		if scar.BadPattern != "" {
+			entry.WriteString(fmt.Sprintf("\n  *Don't*: `%s`", scar.BadPattern))
+		}
+		if scar.GoodPattern != "" {
+			entry.WriteString(fmt.Sprintf("\n  *Do*: `%s`", scar.GoodPattern))
+		}
+		if len(scar.Verifier.Argv) > 0 {
+			entry.WriteString(fmt.Sprintf("\n  *Verify*: `%s`", strings.Join(scar.Verifier.Argv, " ")))
+		}
 		if scar.Applicability != "" {
 			entry.WriteString(fmt.Sprintf("\n  *Applicability*: %s", scar.Applicability))
 		}

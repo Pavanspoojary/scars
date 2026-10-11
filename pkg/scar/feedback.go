@@ -92,3 +92,62 @@ func (s *Store) LoadFeedback() ([]FeedbackEntry, error) {
 
 	return entries, scanner.Err()
 }
+
+// ScarQualitySummary provides aggregated feedback statistics and quality score for a scar.
+type ScarQualitySummary struct {
+	ScarID     string  `json:"scar_id"`
+	Helpful    int     `json:"helpful"`
+	Irrelevant int     `json:"irrelevant"`
+	Incorrect  int     `json:"incorrect"`
+	Unrated    int     `json:"unrated"`
+	Total      int     `json:"total"`
+	Score      float64 `json:"score"` // (helpful - 1.5*irrelevant - 2.0*incorrect) / total
+}
+
+// GetScarQuality computes feedback aggregation for a specific scar ID.
+func (s *Store) GetScarQuality(scarID string) (ScarQualitySummary, error) {
+	all, err := s.GetAllScarQualities()
+	if err != nil {
+		return ScarQualitySummary{ScarID: scarID}, err
+	}
+	if q, ok := all[scarID]; ok {
+		return q, nil
+	}
+	return ScarQualitySummary{ScarID: scarID}, nil
+}
+
+// GetAllScarQualities aggregates feedback across all recorded entries in .gitscars/.local/feedback.jsonl.
+func (s *Store) GetAllScarQualities() (map[string]ScarQualitySummary, error) {
+	entries, err := s.LoadFeedback()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]ScarQualitySummary)
+	for _, entry := range entries {
+		q := result[entry.ScarID]
+		q.ScarID = entry.ScarID
+		q.Total++
+		switch entry.Rating {
+		case "helpful":
+			q.Helpful++
+		case "irrelevant":
+			q.Irrelevant++
+		case "incorrect":
+			q.Incorrect++
+		case "unrated":
+			q.Unrated++
+		}
+		result[entry.ScarID] = q
+	}
+
+	for id, q := range result {
+		if q.Total > 0 {
+			net := float64(q.Helpful) - (1.5 * float64(q.Irrelevant)) - (2.0 * float64(q.Incorrect))
+			q.Score = net / float64(q.Total)
+			result[id] = q
+		}
+	}
+
+	return result, nil
+}

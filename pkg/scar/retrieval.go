@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type QueryOptions struct {
 type ScoredScar struct {
 	Scar        *Scar    `json:"scar"`
 	Score       int      `json:"score"`
+	Confidence  float64  `json:"confidence,omitempty"`
 	Freshness   string   `json:"freshness"`
 	Matches     []string `json:"matches"`
 	Explanation string   `json:"explanation"`
@@ -48,55 +50,48 @@ type ScoredEntryV1 struct {
 	Title       string   `json:"title"`
 	Lesson      string   `json:"lesson"` // JSON string field prevents delimiter impersonation
 	Score       int      `json:"score"`
+	Confidence  float64  `json:"confidence,omitempty"`
 	Freshness   string   `json:"freshness"`
 	Matches     []string `json:"matches"`
 	Explanation string   `json:"explanation"`
 	Anchors     Anchors  `json:"anchors"`
 }
 
+// MaxPossibleScore is the sum of max per-category contributions.
+// File(5) + Symbol(4) + Dependency(3) + Error(3) + Command(2) + TaskTerms(2) = 19.
+const MaxPossibleScore = 19
+
+// ConfidenceForScore converts a raw score into a 0..1 confidence value.
+func ConfidenceForScore(score int) float64 {
+	if score <= 0 {
+		return 0
+	}
+	c := float64(score) / float64(MaxPossibleScore)
+	if c > 1 {
+		return 1
+	}
+	return c
+}
+
 // ScoreScarItem computes the deterministic score for a single scar against query inputs.
+// Retrieval v2: exact file(+5) else basename(+2) else same-dir(+1); exact symbol(+4)
+// else normalized suffix(+2); normalized error substring(+3). Partial file signals
+// remain below the abstain threshold alone to preserve retrieval precision.
+// At most one contribution per category to preserve EVAL determinism.
 func ScoreScarItem(s *Scar, q QueryOptions) ScoredScar {
 	res := ScoredScar{Scar: s, Matches: []string{}}
 	score := 0
 
-	// 1. File anchor match (+5)
-	fileMatched := false
-	for _, qf := range q.Files {
-		cleanQf := filepath.Clean(qf)
-		for _, sf := range s.Anchors.Files {
-			if strings.EqualFold(cleanQf, filepath.Clean(sf)) {
-				fileMatched = true
-				break
-			}
-		}
-		if fileMatched {
-			break
-		}
-	}
-	if fileMatched {
-		score += 5
-		res.Matches = append(res.Matches, "file(+5)")
+	// 1. File anchor match: exact(+5) > basename(+2) > same-dir(+1)
+	if fs, label := matchFileAnchor(q.Files, s.Anchors.Files); fs > 0 {
+		score += fs
+		res.Matches = append(res.Matches, label)
 	}
 
-	// 2. Symbol anchor match (+4)
-	symbolMatched := false
-	for _, qs := range q.Symbols {
-		if qs == "" {
-			continue
-		}
-		for _, ss := range s.Anchors.Symbols {
-			if qs == ss {
-				symbolMatched = true
-				break
-			}
-		}
-		if symbolMatched {
-			break
-		}
-	}
-	if symbolMatched {
-		score += 4
-		res.Matches = append(res.Matches, "symbol(+4)")
+	// 2. Symbol anchor match: exact(+4) else normalized(+2)
+	if ss, label := matchSymbolAnchor(q.Symbols, s.Anchors.Symbols); ss > 0 {
+		score += ss
+		res.Matches = append(res.Matches, label)
 	}
 
 	// 3. Exact dependency and compatible version match (+3)
@@ -114,15 +109,26 @@ func ScoreScarItem(s *Scar, q QueryOptions) ScoredScar {
 		res.Matches = append(res.Matches, "dependency(+3)")
 	}
 
-	// 4. Error signature match (+3)
+	// 4. Error signature match (+3) on normalized text
 	if q.ErrorSignature != "" {
+		normQ := NormalizeErrorSignature(q.ErrorSignature)
+		matched := false
 		for _, es := range s.Anchors.ErrorSignatures {
-			if es != "" && (strings.Contains(strings.ToLower(q.ErrorSignature), strings.ToLower(es)) ||
+			if es == "" {
+				continue
+			}
+			normE := NormalizeErrorSignature(es)
+			if normE != "" && (strings.Contains(normQ, normE) ||
+				strings.Contains(normE, normQ) ||
+				strings.Contains(strings.ToLower(q.ErrorSignature), strings.ToLower(es)) ||
 				strings.Contains(strings.ToLower(es), strings.ToLower(q.ErrorSignature))) {
-				score += 3
-				res.Matches = append(res.Matches, "error_sig(+3)")
+				matched = true
 				break
 			}
+		}
+		if matched {
+			score += 3
+			res.Matches = append(res.Matches, "error_sig(+3)")
 		}
 	}
 
@@ -155,8 +161,85 @@ func ScoreScarItem(s *Scar, q QueryOptions) ScoredScar {
 	}
 
 	res.Score = score
+	res.Confidence = ConfidenceForScore(score)
 	res.Explanation = strings.Join(res.Matches, ", ")
 	return res
+}
+
+// matchFileAnchor returns the best single file contribution.
+// Exact path(+5), same basename(+2, likely move/rename), same directory(+1,
+// module proximity). Partial signals stay below the abstain threshold (3)
+// unless combined with an additional signal, preserving precision.
+func matchFileAnchor(queryFiles, anchorFiles []string) (int, string) {
+	best := 0
+	label := ""
+	for _, qf := range queryFiles {
+		if qf == "" {
+			continue
+		}
+		cleanQf := filepath.Clean(qf)
+		qBase := strings.ToLower(filepath.Base(cleanQf))
+		qDir := strings.ToLower(filepath.Dir(cleanQf))
+		for _, sf := range anchorFiles {
+			cleanSf := filepath.Clean(sf)
+			if strings.EqualFold(cleanQf, cleanSf) {
+				return 5, "file(+5)"
+			}
+			sDir := strings.ToLower(filepath.Dir(cleanSf))
+			sBase := strings.ToLower(filepath.Base(cleanSf))
+			if qBase != "" && qBase == sBase && best < 2 {
+				best = 2
+				label = "file_base(+2)"
+			} else if qDir != "" && qDir != "." && qDir == sDir && best < 1 {
+				best = 1
+				label = "file_dir(+1)"
+			}
+		}
+	}
+	return best, label
+}
+
+// NormalizeSymbol strips receivers and package qualifiers:
+// "(*Exporter).RecordMetric" -> "recordmetric", "pkg/auth.Context" -> "context".
+func NormalizeSymbol(sym string) string {
+	s := strings.TrimSpace(sym)
+	// Strip receiver prefix like "(*T)." or "(T)."
+	if idx := strings.LastIndex(s, ")."); idx != -1 {
+		s = s[idx+2:]
+	} else if idx := strings.LastIndex(s, "."); idx != -1 {
+		s = s[idx+1:]
+	}
+	s = strings.Trim(s, "() *")
+	return strings.ToLower(s)
+}
+
+// matchSymbolAnchor returns exact(+4) else normalized suffix(+2).
+func matchSymbolAnchor(querySyms, anchorSyms []string) (int, string) {
+	for _, qs := range querySyms {
+		if qs == "" {
+			continue
+		}
+		for _, ss := range anchorSyms {
+			if qs == ss {
+				return 4, "symbol(+4)"
+			}
+		}
+	}
+	for _, qs := range querySyms {
+		if qs == "" {
+			continue
+		}
+		nq := NormalizeSymbol(qs)
+		if nq == "" {
+			continue
+		}
+		for _, ss := range anchorSyms {
+			if nq == NormalizeSymbol(ss) {
+				return 2, "symbol_norm(+2)"
+			}
+		}
+	}
+	return 0, ""
 }
 
 func computeOverlap(docText, queryText string) int {
@@ -199,6 +282,29 @@ func tokenizeWords(s string) map[string]bool {
 	return m
 }
 
+var (
+	errHexRe  = regexp.MustCompile(`0x[0-9a-fA-F]+`)
+	errNumRe  = regexp.MustCompile(`\b\d+(\.\d+)*\b`)
+	errPathRe = regexp.MustCompile(`[\w\-./\\]+\.\w+:\d+(:\d+)?`)
+	errTimeRe = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?`)
+	errAddrRe = regexp.MustCompile(`\+0x[0-9a-fA-F]+`)
+)
+
+// NormalizeErrorSignature strips volatile tokens (hex, line numbers, timestamps)
+// and lowercases for stable deterministic matching.
+func NormalizeErrorSignature(s string) string {
+	n := strings.ToLower(strings.TrimSpace(s))
+	n = errAddrRe.ReplaceAllString(n, "")
+	n = errHexRe.ReplaceAllString(n, "<hex>")
+	n = errPathRe.ReplaceAllString(n, "<loc>")
+	n = errTimeRe.ReplaceAllString(n, "<time>")
+	// Collapse leftover standalone numbers to avoid line-number brittleness,
+	// but keep short words intact.
+	n = errNumRe.ReplaceAllString(n, "<n>")
+	n = strings.Join(strings.Fields(n), " ")
+	return n
+}
+
 // Recall retrieves scars matching query options.
 func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 	threshold := q.Threshold
@@ -222,30 +328,92 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 		q.InstalledDependencies = GetRepoDependencies(s.RepoRoot)
 	}
 
-	scars, err := s.ListScars()
-	if err != nil {
-		return nil, err
+	qualities, _ := s.GetAllScarQualities()
+	applyFeedbackPenalty := func(scored *ScoredScar) {
+		if qualities == nil || scored.Scar == nil {
+			return
+		}
+		q, ok := qualities[scored.Scar.ID]
+		if !ok {
+			return
+		}
+		if q.Incorrect >= 2 || (q.Total >= 3 && q.Helpful == 0) {
+			scored.Score -= 2
+			scored.Matches = append(scored.Matches, "feedback_penalty(-2)")
+			scored.Explanation = strings.Join(scored.Matches, ", ")
+			scored.Confidence = ConfidenceForScore(scored.Score)
+		}
 	}
 
 	var candidates []ScoredScar
-	for _, summary := range scars {
-		scar := summary.Scar
 
-		// Only active scars are retrieved in normal recall
-		if scar.Lifecycle.State != LifecycleActive {
-			continue
+	// Fast-path: score candidates directly from in-memory index cache if fresh
+	idx, idxErr := s.LoadIndex()
+	if idxErr == nil && s.IsIndexFresh(idx) {
+		for _, entry := range idx.Scars {
+			if entry.Lifecycle != LifecycleActive {
+				continue
+			}
+			scarStub := &Scar{
+				ID:        entry.ID,
+				Title:     entry.Title,
+				Lesson:    entry.Lesson,
+				Lifecycle: Lifecycle{State: entry.Lifecycle},
+				Review:    Review{Status: entry.ReviewStatus},
+				Anchors: Anchors{
+					Files:           entry.Files,
+					Symbols:         entry.Symbols,
+					Commands:        entry.Commands,
+					ErrorSignatures: entry.ErrorSignatures,
+					Dependencies:    entry.Dependencies,
+				},
+			}
+			scored := ScoreScarItem(scarStub, q)
+			// Check potential score with feedback before loading from disk
+			if scored.Score >= threshold-2 {
+				fullScar, _, err := s.LoadScar(entry.ID)
+				if err != nil {
+					continue
+				}
+				freshness := s.ComputeFreshness(fullScar)
+				if freshness != FreshnessCurrent && !q.IncludeStale {
+					continue
+				}
+				scored.Scar = fullScar
+				scored.Freshness = freshness
+				applyFeedbackPenalty(&scored)
+				if scored.Score >= threshold {
+					candidates = append(candidates, scored)
+				}
+			}
+		}
+	} else {
+		// Fallback path: full disk scan and baseline calculation across all scars
+		scars, err := s.ListScars()
+		if err != nil {
+			return nil, err
 		}
 
-		// Freshness rule: exclude changed or unavailable scars unless --include-stale
-		if summary.Freshness != FreshnessCurrent && !q.IncludeStale {
-			continue
-		}
+		for _, summary := range scars {
+			scar := summary.Scar
 
-		scored := ScoreScarItem(scar, q)
-		scored.Freshness = summary.Freshness
+			// Only active scars are retrieved in normal recall
+			if scar.Lifecycle.State != LifecycleActive {
+				continue
+			}
 
-		if scored.Score >= threshold {
-			candidates = append(candidates, scored)
+			// Freshness rule: exclude changed or unavailable scars unless --include-stale
+			if summary.Freshness != FreshnessCurrent && !q.IncludeStale {
+				continue
+			}
+
+			scored := ScoreScarItem(scar, q)
+			scored.Freshness = summary.Freshness
+			applyFeedbackPenalty(&scored)
+
+			if scored.Score >= threshold {
+				candidates = append(candidates, scored)
+			}
 		}
 	}
 
@@ -297,6 +465,7 @@ func FormatRecallJSON(query QueryOptions, candidates []ScoredScar) ([]byte, erro
 			Title:       c.Scar.Title,
 			Lesson:      c.Scar.Lesson,
 			Score:       c.Score,
+			Confidence:  c.Confidence,
 			Freshness:   c.Freshness,
 			Matches:     c.Matches,
 			Explanation: c.Explanation,

@@ -48,6 +48,14 @@ const (
 	FreshnessUnavailable = "unavailable"
 )
 
+// Severity levels
+const (
+	SeverityCritical = "critical"
+	SeverityHigh     = "high"
+	SeverityMedium   = "medium"
+	SeverityLow      = "low"
+)
+
 // DependencyAnchor defines a library/package requirement.
 type DependencyAnchor struct {
 	Name    string `json:"name"`
@@ -105,6 +113,10 @@ type Scar struct {
 	Slug          string    `json:"slug"`
 	Title         string    `json:"title"`
 	Lesson        string    `json:"lesson"`
+	Severity      string    `json:"severity,omitempty"` // critical | high | medium | low (default: medium)
+	FixHint       string    `json:"fix_hint,omitempty"`
+	BadPattern    string    `json:"bad_pattern,omitempty"`
+	GoodPattern   string    `json:"good_pattern,omitempty"`
 	Applicability string    `json:"applicability,omitempty"`
 	Anchors       Anchors   `json:"anchors"`
 	BaseCommit    string    `json:"base_commit,omitempty"`
@@ -137,6 +149,7 @@ func NewDraft(slug, title, lesson string, files []string) (*Scar, error) {
 		Slug:          slug,
 		Title:         strings.TrimSpace(title),
 		Lesson:        strings.TrimSpace(lesson),
+		Severity:      SeverityMedium,
 		Anchors: Anchors{
 			Files: files,
 		},
@@ -163,6 +176,15 @@ func (s *Scar) ValidateInvariants() error {
 	}
 	if strings.TrimSpace(s.Title) == "" {
 		return errors.New("scar title cannot be empty")
+	}
+
+	// Validate severity if specified
+	if s.Severity != "" {
+		switch s.Severity {
+		case SeverityCritical, SeverityHigh, SeverityMedium, SeverityLow:
+		default:
+			return fmt.Errorf("invalid severity %q", s.Severity)
+		}
 	}
 
 	// Validate lifecycle state enum
@@ -247,6 +269,41 @@ func (s *Scar) Retire(rationale string) error {
 			s.Review.Rationale = "Retired: " + rationale
 		}
 	}
+	return s.ValidateInvariants()
+}
+
+// Contradict marks a scar as contradicted by another scar with documented rationale.
+func (s *Scar) Contradict(byScarID, rationale string) error {
+	s.Lifecycle.State = LifecycleContradicted
+	if byScarID != "" {
+		found := false
+		for _, c := range s.Lifecycle.ConflictsWith {
+			if c == byScarID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			s.Lifecycle.ConflictsWith = append(s.Lifecycle.ConflictsWith, byScarID)
+		}
+	}
+	if rationale != "" {
+		if s.Review.Rationale != "" {
+			s.Review.Rationale = s.Review.Rationale + " | Contradicted: " + rationale
+		} else {
+			s.Review.Rationale = "Contradicted: " + rationale
+		}
+	}
+	return s.ValidateInvariants()
+}
+
+// Supersede marks a scar as superseded by a successor scar.
+func (s *Scar) Supersede(byScarID string) error {
+	if strings.TrimSpace(byScarID) == "" {
+		return errors.New("supersede requires successor scar ID")
+	}
+	s.Lifecycle.State = LifecycleSuperseded
+	s.Lifecycle.SupersededBy = byScarID
 	return s.ValidateInvariants()
 }
 

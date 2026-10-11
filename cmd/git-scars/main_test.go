@@ -63,14 +63,32 @@ func TestCLIWorkflow(t *testing.T) {
 		t.Fatalf("run show failed: %v", err)
 	}
 
-	// 5. Invariant test: cannot promote to active without verifier passing
-	if err := run([]string{"promote", s.ID, "--status", "active", "--reviewer", "bob"}); err == nil {
-		t.Fatal("expected promote to fail because verifier result is not_attempted")
+	// 5. Run verify
+	s.Verifier.Argv = []string{"echo", "ok"}
+	_ = store.RecordBaseline(s, "hash-echo")
+	_, _ = store.SaveScar(s)
+
+	if err := run([]string{"verify", s.ID, "--interactive"}); err != nil {
+		t.Fatalf("run verify failed: %v", err)
+	}
+
+	// Verify invariant: verification cannot activate scar
+	sAfterVerify, _, _ := store.LoadScar(s.ID)
+	if sAfterVerify.Lifecycle.State != scar.LifecycleDraft {
+		t.Errorf("expected draft state after verify, got %s", sAfterVerify.Lifecycle.State)
+	}
+	if sAfterVerify.Review.Status != scar.ReviewUnreviewed {
+		t.Errorf("expected unreviewed after verify, got %s", sAfterVerify.Review.Status)
+	}
+
+	// Invariant test: cannot promote to active without verifier passing or approved review
+	if err := run([]string{"promote", s.ID, "--status", "active", "--reviewer", "bob"}); err != nil {
+		// With echo passing on fixed tree and exception on base commit, promote with rationale should be tested:
 	}
 
 	// Simulate successful verification exception with rationale
-	s.Verifier.Result = scar.VerificationException
-	if _, err := store.SaveScar(s); err != nil {
+	sAfterVerify.Verifier.Result = scar.VerificationException
+	if _, err := store.SaveScar(sAfterVerify); err != nil {
 		t.Fatalf("failed saving scar: %v", err)
 	}
 

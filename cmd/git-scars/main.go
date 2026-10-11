@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -40,6 +41,8 @@ func run(args []string) error {
 		return runShow(store, args[1:])
 	case "promote":
 		return runPromote(store, args[1:])
+	case "verify":
+		return runVerify(store, args[1:])
 	case "retire":
 		return runRetire(store, args[1:])
 	case "reaffirm":
@@ -106,6 +109,21 @@ func runInit(store *scar.Store) error {
 }
 
 func runAdd(store *scar.Store, args []string) error {
+	if len(args) > 0 && args[0] == "from-commit" {
+		if len(args) < 2 {
+			return fmt.Errorf("usage: git-scars add from-commit <sha>")
+		}
+		sha := args[1]
+		draft, path, err := store.DraftFromCommit(sha)
+		if err != nil {
+			return fmt.Errorf("failed capturing scar from commit %s: %w", sha, err)
+		}
+		fmt.Printf("Created draft scar from commit %s:\nID: %s\nPath: %s\nBase Commit: %s\nAnchored Files: %s\nInferred Verifier: %s\nStatus: %s (review: %s, verifier: %s)\n",
+			sha, draft.ID, path, draft.BaseCommit, strings.Join(draft.Anchors.Files, ", "), strings.Join(draft.Verifier.Argv, " "),
+			draft.Lifecycle.State, draft.Review.Status, draft.Verifier.Result)
+		return nil
+	}
+
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	title := fs.String("title", "", "Descriptive failure title")
 	lesson := fs.String("lesson", "", "Concise prevention lesson")
@@ -116,7 +134,7 @@ func runAdd(store *scar.Store, args []string) error {
 	}
 
 	if *title == "" {
-		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\")")
+		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\") or add from-commit <sha>")
 	}
 
 	var files []string
@@ -136,6 +154,43 @@ func runAdd(store *scar.Store, args []string) error {
 
 	fmt.Printf("Created draft scar: %s\nPath: %s\nStatus: %s (review: %s, verifier: %s)\n",
 		draft.ID, path, draft.Lifecycle.State, draft.Review.Status, draft.Verifier.Result)
+	return nil
+}
+
+func runVerify(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
+	interactive := fs.Bool("interactive", false, "Interactively approve and trust verifier command")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars verify <id> [--interactive]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	s, path, err := store.LoadScar(id)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	outcome, err := store.VerifyFailToPass(ctx, s, nil, *interactive)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "verification notice: %v\n", err)
+	}
+
+	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
+	if _, saveErr := store.SaveScar(s); saveErr != nil {
+		return fmt.Errorf("failed saving verified scar: %w", saveErr)
+	}
+
+	fmt.Printf("Recorded verification for scar %s:\nResult: %s\nCommand Hash: %s\nSaved to: %s\n",
+		s.ID, outcome, s.Verifier.CommandHash, path)
+	if s.Verifier.OutputExcerpt != "" {
+		fmt.Printf("Output excerpt:\n%s\n", s.Verifier.OutputExcerpt)
+	}
+	fmt.Printf("\nNote: Verification recorded. A human reviewer must run 'git-scars promote %s' to approve and activate.\n", s.ID)
 	return nil
 }
 

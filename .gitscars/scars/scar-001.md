@@ -25,12 +25,14 @@ verifier:
 baseline:
   recorded_at: "2026-10-11T08:00:00Z"
   command_hash: "2d4b1ee683d6be106b1633c27fedb692d3f757a5aa049397e28ef1cbd6d52736"
-  cmd/git-scars/main.go: "6ab7f69bf37e8a8415357b961fb6d68edad7c4410d1088b2ab2cf3fda19b88ec"
+  cmd/git-scars/main.go: "84376b48e7617c95089212122630f1ed6bf7117802eed4e81f6c366db66c90f8"
+  symbol_hashes:
+    run: "a04453ed4eb45118c25c3a9ef8db55a5bed059c461a1a7fd4677d04b2eb13ad5"
 review:
   status: "approved"
   reviewer: "maintainer"
   date: "2026-10-11T08:00:00Z"
-  rationale: "Reaffirmed: Updated anchor baseline after v1.0.0 agent superpowers additions (inject, sync, triage, mcp write)"
+  rationale: "Reaffirmed: Updated anchor baseline after v1.2.0 evolution (harvest, bundle, heal, sarif subcommands added to main.go)"
 lifecycle:
   state: "active"
 ---

@@ -242,4 +242,9 @@ func TestCLIRecallLintFeedback(t *testing.T) {
 	if err := run([]string{"inject", "--files", "pkg/worker.go", "--budget", "300", "--format", "markdown"}); err != nil {
 		t.Fatalf("inject markdown failed: %v", err)
 	}
+
+	// 13. Sync command
+	if err := run([]string{"sync", "--targets", "AGENTS.md,CLAUDE.md"}); err != nil {
+		t.Fatalf("sync command failed: %v", err)
+	}
 }

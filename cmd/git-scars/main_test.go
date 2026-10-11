@@ -126,3 +126,58 @@ func TestUsageAndHelp(t *testing.T) {
 	}
 	_ = buf
 }
+
+func TestCLIRecallLintFeedback(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-cli-stage3-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	store := scar.NewStore(tmpDir)
+	_ = store.Init()
+
+	s, _, _ := store.CreateDraft("Leak in Worker", "Close reader", []string{"pkg/worker.go"})
+	s.Lifecycle.State = scar.LifecycleActive
+	s.Review.Status = scar.ReviewApproved
+	s.Verifier.Result = scar.VerificationFailToPass
+	_ = store.RecordBaseline(s, "hash-worker")
+	_, _ = store.SaveScar(s)
+
+	// Create anchor file so freshness is Current
+	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/worker.go"), []byte("package worker\n"), 0644)
+	_ = store.RecordBaseline(s, "hash-worker")
+	_, _ = store.SaveScar(s)
+
+	// 1. Recall matching file
+	if err := run([]string{"recall", "--files", "pkg/worker.go"}); err != nil {
+		t.Fatalf("recall matching file failed: %v", err)
+	}
+
+	// 2. Recall with JSON flag
+	if err := run([]string{"recall", "--files", "pkg/worker.go", "--json"}); err != nil {
+		t.Fatalf("recall json failed: %v", err)
+	}
+
+	// 3. Recall abstaining on unrelated query
+	if err := run([]string{"recall", "--task", "Update CSS stylesheet"}); err != nil {
+		t.Fatalf("recall abstain should succeed with 0 exit code: %v", err)
+	}
+
+	// 4. Lint
+	if err := run([]string{"lint"}); err != nil {
+		t.Fatalf("lint failed: %v", err)
+	}
+
+	// 5. Feedback
+	if err := run([]string{"feedback", s.ID, "--rating", "helpful", "--notes", "Avoided recurrence"}); err != nil {
+		t.Fatalf("feedback failed: %v", err)
+	}
+}

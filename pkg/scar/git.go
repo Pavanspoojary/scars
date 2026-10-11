@@ -10,13 +10,13 @@ import (
 
 // GitCommitInfo contains metadata extracted from a git commit.
 type GitCommitInfo struct {
-	SHA        string
-	ParentSHA  string
-	Subject    string
-	Body       string
-	Files      []string
-	TestFiles  []string
-	IsShallow  bool
+	SHA       string
+	ParentSHA string
+	Subject   string
+	Body      string
+	Files     []string
+	TestFiles []string
+	IsShallow bool
 }
 
 // InspectCommit extracts commit metadata without running an LLM.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,6 +44,14 @@ func run(args []string) error {
 		return runPromote(store, args[1:])
 	case "verify":
 		return runVerify(store, args[1:])
+	case "recall":
+		return runRecall(store, args[1:])
+	case "check":
+		return runCheck(store, args[1:])
+	case "lint":
+		return runLint(store, args[1:])
+	case "feedback":
+		return runFeedback(store, args[1:])
 	case "retire":
 		return runRetire(store, args[1:])
 	case "reaffirm":
@@ -336,5 +345,204 @@ func runReaffirm(store *scar.Store, args []string) error {
 	}
 
 	fmt.Printf("Reaffirmed scar %s by %s. Anchor baseline updated to current tree.\n", reaffirmed.ID, *reviewer)
+	return nil
+}
+
+func runRecall(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
+	task := fs.String("task", "", "Coding task description")
+	filesStr := fs.String("files", "", "Comma-separated target files")
+	symbolsStr := fs.String("symbols", "", "Comma-separated symbol anchors")
+	commandsStr := fs.String("commands", "", "Comma-separated command anchors")
+	diffRef := fs.String("diff", "", "Git ref to extract changed files from (e.g. HEAD~1, origin/main)")
+	useStdin := fs.Bool("stdin", false, "Read error output or stack trace from stdin")
+	includeStale := fs.Bool("include-stale", false, "Include changed or unbaselined scars in search candidates")
+	asJSON := fs.Bool("json", false, "Emit versioned reposcars.recall.v1 JSON")
+	threshold := fs.Int("threshold", 3, "Abstain threshold score")
+	topK := fs.Int("top-k", 3, "Maximum scars to return")
+
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	opts := scar.QueryOptions{
+		Task:         *task,
+		DiffRef:      *diffRef,
+		IncludeStale: *includeStale,
+		Threshold:    *threshold,
+		TopK:         *topK,
+	}
+
+	if *filesStr != "" {
+		for _, f := range strings.Split(*filesStr, ",") {
+			if f = strings.TrimSpace(f); f != "" {
+				opts.Files = append(opts.Files, f)
+			}
+		}
+	}
+	if *symbolsStr != "" {
+		for _, s := range strings.Split(*symbolsStr, ",") {
+			if s = strings.TrimSpace(s); s != "" {
+				opts.Symbols = append(opts.Symbols, s)
+			}
+		}
+	}
+	if *commandsStr != "" {
+		for _, c := range strings.Split(*commandsStr, ",") {
+			if c = strings.TrimSpace(c); c != "" {
+				opts.Commands = append(opts.Commands, c)
+			}
+		}
+	}
+
+	if *useStdin {
+		stdinBytes, err := io.ReadAll(os.Stdin)
+		if err == nil && len(stdinBytes) > 0 {
+			opts.ErrorSignature = string(stdinBytes)
+		}
+	}
+
+	results, err := store.Recall(opts)
+	if err != nil {
+		return fmt.Errorf("recall failed: %w", err)
+	}
+
+	if *asJSON {
+		jsonData, err := scar.FormatRecallJSON(opts, results)
+		if err != nil {
+			return err
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
+
+	if len(results) == 0 {
+		fmt.Println("No applicable scars found (abstaining: score < threshold).")
+		return nil
+	}
+
+	fmt.Printf("Retrieved %d relevant scar(s):\n\n", len(results))
+	for idx, r := range results {
+		s := r.Scar
+		fmt.Printf("[%d] %s (Score: %d | Freshness: %s)\n", idx+1, s.Title, r.Score, r.Freshness)
+		fmt.Printf("    ID: %s\n", s.ID)
+		fmt.Printf("    Matched: %s\n", r.Explanation)
+		if len(s.Anchors.Files) > 0 {
+			fmt.Printf("    Anchored Files: %s\n", strings.Join(s.Anchors.Files, ", "))
+		}
+		fmt.Printf("    Lesson: %s\n\n", s.Lesson)
+	}
+	return nil
+}
+
+func runCheck(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("check", flag.ContinueOnError)
+	diffRef := fs.String("diff", "", "Optional git diff ref to evaluate anchor changes")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	res, err := store.RunReadOnlyCheck(*diffRef)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Operational error: %v\n", err)
+		os.Exit(3)
+	}
+
+	fmt.Printf("=== GitScars Read-Only Check ===\n")
+	fmt.Printf("Total Scars: %d | Current: %d | Changed (Stale): %d\n",
+		res.TotalScars, res.CurrentCount, res.ChangedCount)
+
+	if len(res.InvalidScars) > 0 {
+		fmt.Printf("\n[!] Invariant Violations (%d):\n", len(res.InvalidScars))
+		for _, inv := range res.InvalidScars {
+			fmt.Printf("  - %s\n", inv)
+		}
+	}
+
+	if len(res.StaleScars) > 0 {
+		fmt.Printf("\n[!] Stale Active Scars Requiring Reaffirmation (%d):\n", len(res.StaleScars))
+		for _, stale := range res.StaleScars {
+			fmt.Printf("  - %s (anchor modified since last baseline)\n", stale)
+		}
+	}
+
+	if len(res.LintFindings) > 0 {
+		fmt.Printf("\nFindings & Warnings (%d):\n", len(res.LintFindings))
+		for _, f := range res.LintFindings {
+			fmt.Printf("  [%s] %s: %s\n", f.Severity, f.Rule, f.Message)
+		}
+	}
+
+	if res.ExitCode != 0 {
+		fmt.Printf("\nCheck exited with code %d\n", res.ExitCode)
+		os.Exit(res.ExitCode)
+	}
+
+	fmt.Println("\nCheck passed: no blocking findings (exit code 0).")
+	return nil
+}
+
+func runLint(store *scar.Store, args []string) error {
+	scars, err := store.ListScars()
+	if err != nil {
+		return fmt.Errorf("failed reading scars: %w", err)
+	}
+
+	var allScars []*scar.Scar
+	var allFindings []scar.LintFinding
+
+	for _, summary := range scars {
+		s := summary.Scar
+		allScars = append(allScars, s)
+		findings := scar.LintScar(store.RepoRoot, s)
+		allFindings = append(allFindings, findings...)
+	}
+
+	crossFindings := scar.LintCollection(allScars)
+	allFindings = append(allFindings, crossFindings...)
+
+	if len(allFindings) == 0 {
+		fmt.Printf("Lint clean: %d scars audited with zero findings.\n", len(allScars))
+		return nil
+	}
+
+	hasError := false
+	fmt.Printf("Lint findings for %d scars:\n", len(allScars))
+	for _, f := range allFindings {
+		if f.Severity == "ERROR" {
+			hasError = true
+		}
+		fmt.Printf("  [%s] %s (%s): %s\n", f.Severity, f.ScarID, f.Rule, f.Message)
+	}
+
+	if hasError {
+		return fmt.Errorf("lint discovered blocking errors")
+	}
+	return nil
+}
+
+func runFeedback(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("feedback", flag.ContinueOnError)
+	rating := fs.String("rating", "", "Rating: helpful, irrelevant, incorrect, unrated")
+	mode := fs.String("mode", "cli", "Retrieval mode: cli, diff, task, agent")
+	notes := fs.String("notes", "", "Optional feedback notes")
+
+	if len(args) < 1 {
+		return fmt.Errorf("usage: git-scars feedback <id> --rating helpful|irrelevant|incorrect [--notes <text>]")
+	}
+	id := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	if *rating == "" {
+		return fmt.Errorf("--rating required (helpful, irrelevant, incorrect, unrated)")
+	}
+
+	if err := store.RecordFeedback(id, *rating, *mode, *notes); err != nil {
+		return fmt.Errorf("failed recording feedback: %w", err)
+	}
+
+	fmt.Printf("Recorded feedback for scar %s (%s) in .gitscars/.local/feedback.jsonl\n", id, *rating)
 	return nil
 }

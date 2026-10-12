@@ -212,3 +212,23 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Transparent security documentation prevents false assumptions regarding container sandboxing.
   - Harvested drafts are high-signal and reviewable, ensuring sustainable human governance.
   - Retains 100% Go standard library implementation with zero third-party dependencies.
+
+---
+
+## ADR-0014: Purge of Synthetic Metrics and Explicit Demarcation of Scenario Analysis vs Agent Empirical Protocols
+
+- **Date**: 2026-10-12
+- **Status**: Accepted
+- **Context**:
+  - The core thesis of GitScars is that "unverified claims are toxic." Presenting synthetic estimates or hardcoded constants (`PrecisionAt1: 1.00`, `DriftDetectionRate: 1.00`, `0.55`, `0.10`) as "Empirical Evaluation Results" directly undermined that thesis.
+  - No downstream LLM agents had been executed in that harness; token counts were heuristic string-length estimations (`len(text)/4`); and the 10 scenarios were illustrative models rather than agent experiment runs.
+  - Presenting unverified numbers as empirical measurements compromises the intellectual integrity of the project and conflates design modeling with the preregistered empirical multi-agent trial protocol outlined in `EVAL_PLAN.md`.
+- **Decision**:
+  - Completely purged all synthetic rate constants (`DriftDetectionRate`, `ToxicClaimRejectionRate`, `PrecisionAt1`) from `pkg/scar/benchmark_eval.go` and its unit tests.
+  - Relabeled `EVAL_RESULTS.md` to `SCENARIO_ANALYSIS.md` ("Design Estimates & Illustrative Scenario Analysis"), adding a prominent, explicit methodology disclosure box defining what is modeled (prompt token footprints via `EstimateTokens`) versus what is deferred to the multi-agent harness in `EVAL_PLAN.md` (agent repeat rates requiring $\ge 900$ task runs).
+  - Authored `pkg/scar/scenario_mechanics_test.go` to provide executable unit test verification of architectural claims (anchor drift detection on symbol edits, glob fragility on moved files, and verifier gating on active promotion) directly in code.
+  - Aligned `README.md` comparison tables to strictly report architectural capabilities and estimated token footprints rather than synthetic precision percentages.
+- **Consequences**:
+  - 100% intellectual honesty and alignment with repository standards.
+  - Clear separation between static scenario modeling, executable mechanical tests, and future empirical agent trials.
+  - Preserves the credibility of genuine architectural breakthroughs (AST symbol drift detection, scrubbed fail-to-pass verifiers, and token-budgeted prompt injection).

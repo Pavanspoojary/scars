@@ -23,8 +23,8 @@ type BenchmarkScenario struct {
 // PromptStrategyAnalysis records modeled token metrics for a prompt strategy.
 // Note: Token counts are heuristic estimates computed via EstimateTokens() (len(text)/4).
 type PromptStrategyAnalysis struct {
-	Name                string  `json:"name"`
-	StrategyDescription string  `json:"strategy_description"`
+	Name                 string  `json:"name"`
+	StrategyDescription  string  `json:"strategy_description"`
 	TotalTokens          int     `json:"total_tokens"`
 	AverageTokensPerTask float64 `json:"average_tokens_per_task"`
 }
@@ -277,21 +277,21 @@ func RunBenchmarkEvaluation() *BenchmarkReport {
 	return &ScenarioAnalysisReport{
 		ScenariosEvaluated: len(scenarios),
 		MonolithicArm: PromptStrategyAnalysis{
-			Name:                "Monolithic Instructions (AGENTS.md)",
-			StrategyDescription: "Unconditional injection of all repository rules into every prompt.",
-			TotalTokens:         monoPromptTokensAcrossTasks,
+			Name:                 "Monolithic Instructions (AGENTS.md)",
+			StrategyDescription:  "Unconditional injection of all repository rules into every prompt.",
+			TotalTokens:          monoPromptTokensAcrossTasks,
 			AverageTokensPerTask: avgMono,
 		},
 		ScopedRulesArm: PromptStrategyAnalysis{
-			Name:                "Glob-Scoped Rules (.cursor/rules, nested CLAUDE.md)",
-			StrategyDescription: "Path-scoped injection matching file globs; dumps all co-located rules.",
-			TotalTokens:         scopedPromptTokensAcrossTasks,
+			Name:                 "Glob-Scoped Rules (.cursor/rules, nested CLAUDE.md)",
+			StrategyDescription:  "Path-scoped injection matching file globs; dumps all co-located rules.",
+			TotalTokens:          scopedPromptTokensAcrossTasks,
 			AverageTokensPerTask: avgScoped,
 		},
 		GitScarsArm: PromptStrategyAnalysis{
-			Name:                "GitScars (Multi-Signal Recall + Budgeted Inject)",
-			StrategyDescription: "Deterministic multi-signal anchor recall capped to token budget (--budget 400).",
-			TotalTokens:         gitScarsPromptTokensAcrossTasks,
+			Name:                 "GitScars (Multi-Signal Recall + Budgeted Inject)",
+			StrategyDescription:  "Deterministic multi-signal anchor recall capped to token budget (--budget 400).",
+			TotalTokens:          gitScarsPromptTokensAcrossTasks,
 			AverageTokensPerTask: avgGitScars,
 		},
 		TokenSavingsVsMono: savingsVsMono,

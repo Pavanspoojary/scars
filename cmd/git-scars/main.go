@@ -16,7 +16,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.2.0"
+const version = "1.3.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

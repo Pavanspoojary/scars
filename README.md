@@ -17,6 +17,7 @@ When developers edit code or coding agents (Claude Code, Cursor, Antigravity, Wi
 
 - [The Problem](#the-problem)
 - [Architecture & Comparison](#architecture--comparison)
+- [Why Not Just Scoped Rules?](#why-not-just-scoped-rules-cursorrules--claudemd)
 - [How It Works](#how-it-works)
 - [Installation & Build](#installation--build)
 - [Quickstart Workflow](#quickstart-workflow)
@@ -24,12 +25,12 @@ When developers edit code or coding agents (Claude Code, Cursor, Antigravity, Wi
   - [Portable Memory Bundles (`bundle`)](#17-portable-memory-bundles-git-scars-bundle)
   - [Self-Healing Execution Loop (`heal`)](#18-self-healing-execution-loop-git-scars-heal)
   - [CI/CD & SARIF Annotations (`check --format sarif`)](#19-cicd--github-code-scanning-sarif-git-scars-check---format-sarif)
-  - [AST-Aware Fine-Grained Freshness](#20-ast-aware-fine-grained-freshness)
+  - [Multi-Language AST Freshness](#20-multi-language-ast-aware-freshness-go-python-typescript)
 - [File Format & Schema](#file-format--schema)
 - [AI Agent Integration & MCP Server](#ai-agent-integration--mcp-server)
 - [Dependency Manifest & Lockfile Anchors](#dependency-manifest--lockfile-anchors)
 - [CLI Command Reference](#cli-command-reference)
-- [Security, Isolation & Privacy](#security-isolation--privacy)
+- [Security, Threat Model & Privacy](#security-threat-model--privacy)
 - [Documentation & ADRs](#documentation--adrs)
 - [Contributing](#contributing)
 
@@ -47,14 +48,36 @@ Repository knowledge frequently disappears into old commits, closed pull request
 
 ## Architecture & Comparison
 
-| Capability | Flat Rules (`AGENTS.md`) | Vector Memory (RAG) | Git History / PRs | **GitScars (`git-scars`)** |
+| Capability | Monolithic (`AGENTS.md`) | Glob-Scoped (`.cursor/rules`) | Vector Memory (RAG) | **GitScars (`git-scars`)** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Context Overhead** | Linear prompt bloat | Retrieval tokens + vector DB | Manual inspection | $\le 3$ relevant Scars (or clean abstention) |
-| **Retrieval Precision** | None (loaded into all prompts) | Low (semantic hallucination) | Manual search | Deterministic multi-signal anchor scoring |
-| **Freshness Detection** | None (silent obsolescence) | None | None | Dynamic SHA-256 baseline hashing |
-| **Verification Evidence**| Unverified claims | None | Ad-hoc CI logs | Isolated fail-to-pass overlay test |
-| **Human Governance** | Ad-hoc | None | PR code review | Decoupled review state + CODEOWNERS |
-| **Runtime Dependencies**| Offline | Remote embeddings / DB | Local Git | **Zero dependencies (pure Go single binary)** |
+| **Context Overhead** | Linear prompt bloat (`871` tokens) | Co-located glob dump (`187` tokens) | Retrieval tokens + vector DB | **`133` tokens avg (-28.9% vs Scoped, -84.7% vs Mono)** |
+| **Drift Sensitivity** | 0% (Silent obsolescence) | 0% (Silent failure on refactor) | 0% (Unanchored) | **100% (Deterministic file SHA & AST symbol hash)** |
+| **Verification Gate** | Unverified claims | Unverified claims | None | **Scrubbed fail-to-pass test execution** |
+| **Retrieval Precision** | 10% (Loaded indiscriminately) | 55% (Co-located noise) | Variable (Semantic hallucination) | **100% (Multi-signal exact anchor resolution)** |
+| **Host Isolation Boundary** | N/A (Text-only) | N/A (Text-only) | Cloud API risk | **Scrubbed host env (`cleanEnv()`) + trust-hash gate** |
+| **Runtime Dependencies** | Offline text | Offline text | Remote embeddings / DB | **Zero dependencies (pure Go single binary)** |
+
+*For scenario-by-scenario empirical benchmark results across Go, Python, and TypeScript, see [EVAL_RESULTS.md](EVAL_RESULTS.md).*
+
+---
+
+## Why Not Just Scoped Rules (`.cursor/rules` / `CLAUDE.md`)?
+
+Glob-scoped rules (such as Cursor `.cursor/rules/*.mdc` or nested directory `CLAUDE.md` files) provide path-scoping out of the box. Why is GitScars necessary when path-scoping already exists?
+
+In our empirical evaluation across 10 production regression scenarios ([EVAL_RESULTS.md](EVAL_RESULTS.md)), scoped rules fail in three critical production scenarios:
+
+### 1. The Refactored Anchor (Silent Failure)
+- **Failure**: When code is moved or refactored (e.g., `services/billing/calc.py` becomes `core/pricing/calc.py`), glob rules silently stop firing. If obsolete files remain, they fire on dead code. Scoped rules have **0% drift detection**.
+- **GitScars Defense**: Anchors track both file SHA and symbol AST hashes. If anchors move, `git-scars check` fails in CI with exit code 2. Teams maintain an unbroken chain of memory using `git-scars supersede`.
+
+### 2. The Toxic Unverified Claim
+- **Failure**: A developer or AI agent writes an untested rule (e.g., `"Set DisableKeepAlives = true on http.Transport"`). In production, disabling keep-alives forces TLS renegotiation on every connection, crashing API latency and exhausting local ports. Scoped rules accept any markdown without execution proof.
+- **GitScars Defense**: Scars cannot transition to `active` without a runnable fail-to-pass verifier. Claims must be proven against code before entering prompt memory.
+
+### 3. Prompt Inflation & Rule Contradiction
+- **Failure**: In shared directories (`pkg/**` or `services/**`), glob-scoped rules dump every rule into the prompt simultaneously. In our benchmark, editing a client file pulled 4 unrelated concurrency rules (334 tokens of attention dilution).
+- **GitScars Defense**: Token-budgeted injection (`git-scars inject --budget 400`) scores multi-signal anchors (symbols, error signatures, dependency versions) and injects only the exact relevant guardrail with structured `<dont>` and `<do>` instructions.
 
 ---
 
@@ -63,7 +86,7 @@ Repository knowledge frequently disappears into old commits, closed pull request
 ```mermaid
 flowchart TD
     A["Production Bug / Incident"] --> B["Capture Draft (git-scars add / from-commit)"]
-    B --> C["Execute Isolated Verifier (git-scars verify)"]
+    B --> C["Execute Scrubbed Verifier (git-scars verify)"]
     C --> D{"Fail-to-Pass Verified?"}
     D -- Yes --> E["Human Code Review in PR (git-scars promote)"]
     D -- No / Exception --> E
@@ -280,13 +303,17 @@ git-scars dedupe --min 0.75 --json
 ```
 
 ### 16. Automated Historical Regression Mining (`git-scars harvest`)
-Bootstrap repository memory instantly by walking Git history to identify past bug-fixing commits and generating draft scars:
+Bootstrap repository memory by walking Git history to identify past bug-fixing commits and generating draft scars with built-in quality filtering to eliminate draft noise:
+- **Diff-Size Cap (`--max-files 5`)**: Automatically ignores commits touching `> 5` files to avoid noisy reformatting, mass migrations, and large multi-package refactors.
+- **Co-Located Test Requirement**: Skips commits without co-located test updates by default to guarantee verified test behavior (override with `--allow-untested`).
+- **Confidence Scoring (`--min-confidence 7`)**: Computes a 1-10 quality confidence score based on message clarity, test co-location, and scope; drafts scoring below 7 are rejected to prevent human review fatigue.
+
 ```bash
-# Preview candidate bug fixes in recent commit history (dry run)
+# Preview high-confidence candidate bug fixes in recent commit history (dry run)
 git-scars harvest --max 50 --dry-run
 
-# Automatically generate draft scars for review and promotion
-git-scars harvest --max 100
+# Automatically generate quality-filtered draft scars for review and promotion
+git-scars harvest --max 100 --min-confidence 7
 
 # Inspect findings as structured JSON
 git-scars harvest --json
@@ -329,9 +356,14 @@ git-scars check --format sarif > git-scars.sarif
 git-scars enforce --files "pkg/auth.go" --format sarif
 ```
 
-### 20. AST-Aware Fine-Grained Freshness
-GitScars includes built-in AST symbol hashing for Go (`go/parser`, `go/ast`). When anchor source files are modified:
-- If anchored functions, types, or methods remain syntactically identical (e.g. comments, whitespace, or unrelated helper functions changed), freshness remains **`current`**.
+### 20. Multi-Language AST-Aware Freshness (Go, Python, TypeScript)
+GitScars includes built-in syntactic symbol hashing across multiple languages to eliminate reaffirm fatigue:
+- **Go**: Full AST symbol declaration extraction via `go/parser` and `go/ast`.
+- **Python**: Function (`def`, `async def`) and class (`class`) definition hashing.
+- **TypeScript & JavaScript**: Functions, classes, interfaces, types, and exported symbols.
+
+When anchor source files are modified:
+- If anchored symbols remain syntactically identical (e.g. comments, whitespace, imports, or unrelated helper functions changed), freshness remains **`current`**, eliminating rubber-stamp reaffirmations on hot files.
 - If anchored symbol declarations are altered or removed, freshness transitions to **`changed`** (stale), signaling the need for review and reaffirmation.
 
 ---
@@ -556,21 +588,26 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 ---
 
-## Security, Isolation & Privacy
+## Security, Threat Model & Privacy
 
-- **Untrusted Content**: Scars are treated as untrusted data, never privileged agent instructions.
-- **Argv Execution**: Verifiers are represented as `argv` arrays and executed without shell interpolation by default.
-- **Environment Scrubbing**: Only an allowlisted set of environment variables (`PATH`, `HOME`, `LANG`, `TMPDIR`, `USER`) are passed into verifier processes.
-- **Secret Redaction**: Automated regex scrubbing redacts Bearer tokens, private keys, and passwords before recording excerpts.
-- **Zero Cloud Telemetry**: All feedback, index caches, and command trust lists are stored locally in gitignored `.gitscars/.local/`.
+### Scrubbed Environment, Not Container Isolation
+`git-scars verify` executes verifiers directly on the host machine. While environment variables are scrubbed (`cleanEnv()`) and shell interpolation is prevented via direct `exec.Command` argv arrays, **verifiers run with the permissions of the host process and have full filesystem and network access**. Scrubbing is not OS container isolation.
+
+### Threat Model & Trust Boundaries
+1. **Never Auto-Run Untrusted Verifiers**: Verifiers from external pull requests or untrusted memory bundles must be reviewed before execution.
+2. **Deterministic Command Trust-Hash**: Verification commands are hashed (`sha256`) and recorded in `verifier.command_hash`. Invariant checks reject verifiers whose hashes do not match.
+3. **Mandatory Human Review Gate**: Scars cannot become `active` without explicit human sign-off (`git-scars promote --reviewer`). Untrusted drafts cannot inject guardrails into agent prompts.
+4. **Secret Redaction**: Automated regex scrubbing redacts Bearer tokens, private keys, API keys, and passwords before recording execution outputs.
+5. **Zero Cloud Telemetry**: All feedback, index caches, and command trust lists are stored locally in gitignored `.gitscars/.local/`. No data leaves your machine.
 
 ---
 
 ## Documentation & ADRs
 
-- [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
+- [EVAL_RESULTS.md](EVAL_RESULTS.md): Empirical benchmark evaluation results across 10 regression replays comparing GitScars, glob-scoped rules, and monolithic rules.
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0012).
+- [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0013).
 
 ---
 

@@ -189,10 +189,26 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Enables zero-configuration GitHub Code Scanning PR annotations and cross-repository memory sharing.
   - Maintains 100% Go standard library implementation with zero external dependencies.
 
+---
 
+## ADR-0013: Transparent Threat Model, Multi-Language Symbol Freshness, and Scoped-Rule Differentiation
 
-
-
-
-
-
+- **Date**: 2026-10-12
+- **Status**: Accepted
+- **Context**:
+  - Comparative claims must be grounded in empirical evidence rather than speculative marketing. The primary competitor to GitScars in developer workflows is not vector RAG, but glob-scoped rule engines (`.cursor/rules/*.mdc`, nested directory `CLAUDE.md`).
+  - AST symbol hashing was previously implemented only for Go. In multi-language repositories (Python, TypeScript, JavaScript), file SHA hashing marked scars stale on any cosmetic edit to hot files, causing human reaffirmation fatigue.
+  - Claiming "isolated verifier execution" overclaims security properties. While `cleanEnv()` scrubs environment variables and `exec.Command` avoids shell interpolation, verifiers execute on the host system with the permissions, filesystem access, and network access of the host process.
+  - Mining historical commits (`git-scars harvest`) without strict quality heuristics can produce excessive, low-signal drafts, degrading review habits and adoption.
+- **Decision**:
+  - Implemented empirical replay evaluation (`pkg/scar/benchmark_eval.go`, `EVAL_RESULTS.md`) across 10 production regression scenarios in Go, Python, and TypeScript, measuring exact token footprints, drift sensitivity, toxic claim rejection, and retrieval precision.
+  - Documented the three concrete failure modes of glob-scoped rules: anchor refactoring (silent failure), unverified toxic claims, and multi-rule prompt inflation in shared packages.
+  - Implemented regex-based multi-language AST/symbol extraction for Python (`def`, `class`, `async def`) and TypeScript/JavaScript (functions, classes, interfaces, types, exported symbols) in `pkg/scar/ast.go`, extending symbol freshness to all major languages.
+  - Formally updated terminology from "isolated" to "scrubbed-environment verifier" and established explicit documentation for the host execution threat model and trust boundaries.
+  - Hardened `git-scars harvest` with diff-size caps (`<= 5` files), required co-located test modifications by default (`--allow-untested` flag), and quality confidence scoring (`>= 7/10`).
+- **Consequences**:
+  - Clear, measurable competitive differentiation against glob-scoped rules backed by reproducible benchmarks.
+  - Eliminates reaffirmation fatigue across Go, Python, and TypeScript codebases.
+  - Transparent security documentation prevents false assumptions regarding container sandboxing.
+  - Harvested drafts are high-signal and reviewable, ensuring sustainable human governance.
+  - Retains 100% Go standard library implementation with zero third-party dependencies.

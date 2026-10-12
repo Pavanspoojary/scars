@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestRunBenchmarkEvaluation(t *testing.T) {
-	report := RunBenchmarkEvaluation()
+func TestRunScenarioAnalysis(t *testing.T) {
+	report := RunScenarioAnalysis()
 
 	if report.ScenariosEvaluated != 10 {
 		t.Fatalf("expected 10 evaluated scenarios, got %d", report.ScenariosEvaluated)
@@ -23,7 +23,7 @@ func TestRunBenchmarkEvaluation(t *testing.T) {
 			report.ScopedRulesArm.AverageTokensPerTask, report.MonolithicArm.AverageTokensPerTask)
 	}
 
-	// Verify significant token savings
+	// Verify modeled token savings
 	if report.TokenSavingsVsScop <= 20.0 {
 		t.Errorf("expected >20%% token savings vs scoped rules, got %.1f%%", report.TokenSavingsVsScop)
 	}
@@ -31,21 +31,13 @@ func TestRunBenchmarkEvaluation(t *testing.T) {
 		t.Errorf("expected >70%% token savings vs monolithic rules, got %.1f%%", report.TokenSavingsVsMono)
 	}
 
-	// Verify drift sensitivity and rejection rates
-	if report.GitScarsArm.DriftDetectionRate != 1.0 {
-		t.Errorf("expected 100%% drift detection rate for GitScars, got %.2f", report.GitScarsArm.DriftDetectionRate)
-	}
-	if report.ScopedRulesArm.DriftDetectionRate != 0.0 {
-		t.Errorf("expected 0%% drift detection rate for Scoped rules, got %.2f", report.ScopedRulesArm.DriftDetectionRate)
-	}
-	if report.GitScarsArm.ToxicClaimRejectionRate != 1.0 {
-		t.Errorf("expected 100%% toxic rejection rate for GitScars, got %.2f", report.GitScarsArm.ToxicClaimRejectionRate)
-	}
-
 	// Verify Markdown output generation
-	md := report.GenerateBenchmarkMarkdown()
-	if !strings.Contains(md, "Empirical Evaluation Results") {
-		t.Errorf("expected header in generated Markdown")
+	md := report.GenerateScenarioAnalysisMarkdown()
+	if !strings.Contains(md, "Design Estimates & Illustrative Scenario Analysis") {
+		t.Errorf("expected honest scenario analysis header in generated Markdown")
+	}
+	if !strings.Contains(md, "Methodology & Scope Disclaimer") {
+		t.Errorf("expected methodology disclosure in generated Markdown")
 	}
 	if !strings.Contains(md, "REGR-001") || !strings.Contains(md, "REGR-010") {
 		t.Errorf("expected scenario IDs in generated Markdown")
@@ -55,10 +47,10 @@ func TestRunBenchmarkEvaluation(t *testing.T) {
 	}
 }
 
-func TestWriteBenchmarkResults(t *testing.T) {
-	report := RunBenchmarkEvaluation()
-	md := report.GenerateBenchmarkMarkdown()
-	if err := os.WriteFile("../../EVAL_RESULTS.md", []byte(md), 0644); err != nil {
-		t.Fatalf("failed to write EVAL_RESULTS.md: %v", err)
+func TestWriteScenarioAnalysisResults(t *testing.T) {
+	report := RunScenarioAnalysis()
+	md := report.GenerateScenarioAnalysisMarkdown()
+	if err := os.WriteFile("../../SCENARIO_ANALYSIS.md", []byte(md), 0644); err != nil {
+		t.Fatalf("failed to write SCENARIO_ANALYSIS.md: %v", err)
 	}
 }

@@ -20,26 +20,31 @@ type BenchmarkScenario struct {
 	Verifier       []string
 }
 
-// BenchmarkEvaluationArm records measured metrics for an evaluation condition.
-type BenchmarkEvaluationArm struct {
-	Name                    string  `json:"name"`
-	TotalTokens             int     `json:"total_tokens"`
-	AverageTokensPerTask    float64 `json:"average_tokens_per_task"`
-	DriftDetectionRate      float64 `json:"drift_detection_rate"`
-	ToxicClaimRejectionRate float64 `json:"toxic_claim_rejection_rate"`
-	PrecisionAt1            float64 `json:"precision_at_1"`
+// PromptStrategyAnalysis records modeled token metrics for a prompt strategy.
+// Note: Token counts are heuristic estimates computed via EstimateTokens() (len(text)/4).
+type PromptStrategyAnalysis struct {
+	Name                string  `json:"name"`
+	StrategyDescription string  `json:"strategy_description"`
+	TotalTokens          int     `json:"total_tokens"`
+	AverageTokensPerTask float64 `json:"average_tokens_per_task"`
 }
 
-// BenchmarkReport contains aggregated empirical findings across 10 regression replays.
-type BenchmarkReport struct {
+// ScenarioAnalysisReport contains aggregated prompt token measurements across 10 regression scenarios.
+// Note: This report measures deterministic prompt token footprints and illustrates architectural trade-offs.
+// It does NOT measure downstream LLM agent task success rates, which require multi-agent empirical trials
+// as specified in EVAL_PLAN.md.
+type ScenarioAnalysisReport struct {
 	ScenariosEvaluated int                      `json:"scenarios_evaluated"`
-	MonolithicArm      BenchmarkEvaluationArm   `json:"monolithic_arm"`
-	ScopedRulesArm     BenchmarkEvaluationArm   `json:"scoped_rules_arm"`
-	GitScarsArm        BenchmarkEvaluationArm   `json:"git_scars_arm"`
+	MonolithicArm      PromptStrategyAnalysis   `json:"monolithic_arm"`
+	ScopedRulesArm     PromptStrategyAnalysis   `json:"scoped_rules_arm"`
+	GitScarsArm        PromptStrategyAnalysis   `json:"git_scars_arm"`
 	TokenSavingsVsMono float64                  `json:"token_savings_vs_monolithic_pct"`
 	TokenSavingsVsScop float64                  `json:"token_savings_vs_scoped_pct"`
 	Details            []BenchmarkScenarioScore `json:"details"`
 }
+
+// BenchmarkReport is an alias for backwards compatibility.
+type BenchmarkReport = ScenarioAnalysisReport
 
 // BenchmarkScenarioScore records detailed per-task measurements.
 type BenchmarkScenarioScore struct {
@@ -269,31 +274,25 @@ func RunBenchmarkEvaluation() *BenchmarkReport {
 	savingsVsMono := ((avgMono - avgGitScars) / avgMono) * 100
 	savingsVsScoped := ((avgScoped - avgGitScars) / avgScoped) * 100
 
-	return &BenchmarkReport{
+	return &ScenarioAnalysisReport{
 		ScenariosEvaluated: len(scenarios),
-		MonolithicArm: BenchmarkEvaluationArm{
-			Name:                    "Monolithic Instructions (AGENTS.md)",
-			TotalTokens:             monoPromptTokensAcrossTasks,
-			AverageTokensPerTask:    avgMono,
-			DriftDetectionRate:      0.0,  // 0%: silent failure on file moves or symbol refactors
-			ToxicClaimRejectionRate: 0.0,  // 0%: accepts unverified text claims
-			PrecisionAt1:            0.10, // only 1 of 10 rules is relevant per task
+		MonolithicArm: PromptStrategyAnalysis{
+			Name:                "Monolithic Instructions (AGENTS.md)",
+			StrategyDescription: "Unconditional injection of all repository rules into every prompt.",
+			TotalTokens:         monoPromptTokensAcrossTasks,
+			AverageTokensPerTask: avgMono,
 		},
-		ScopedRulesArm: BenchmarkEvaluationArm{
-			Name:                    "Glob-Scoped Rules (.cursor/rules, nested CLAUDE.md)",
-			TotalTokens:             scopedPromptTokensAcrossTasks,
-			AverageTokensPerTask:    avgScoped,
-			DriftDetectionRate:      0.0,  // 0%: glob matches ghosts if code refactors
-			ToxicClaimRejectionRate: 0.0,  // 0%: unverified markdown committed without execution proof
-			PrecisionAt1:            0.55, // globs frequently match co-located sibling files
+		ScopedRulesArm: PromptStrategyAnalysis{
+			Name:                "Glob-Scoped Rules (.cursor/rules, nested CLAUDE.md)",
+			StrategyDescription: "Path-scoped injection matching file globs; dumps all co-located rules.",
+			TotalTokens:         scopedPromptTokensAcrossTasks,
+			AverageTokensPerTask: avgScoped,
 		},
-		GitScarsArm: BenchmarkEvaluationArm{
-			Name:                    "GitScars (Multi-Signal Recall + Budgeted Inject)",
-			TotalTokens:             gitScarsPromptTokensAcrossTasks,
-			AverageTokensPerTask:    avgGitScars,
-			DriftDetectionRate:      1.0,  // 100%: detects file SHA and symbol AST drift
-			ToxicClaimRejectionRate: 1.0,  // 100%: requires runnable fail-to-pass verifier
-			PrecisionAt1:            1.00, // 100%: exact anchor + symbol resolution
+		GitScarsArm: PromptStrategyAnalysis{
+			Name:                "GitScars (Multi-Signal Recall + Budgeted Inject)",
+			StrategyDescription: "Deterministic multi-signal anchor recall capped to token budget (--budget 400).",
+			TotalTokens:         gitScarsPromptTokensAcrossTasks,
+			AverageTokensPerTask: avgGitScars,
 		},
 		TokenSavingsVsMono: savingsVsMono,
 		TokenSavingsVsScop: savingsVsScoped,
@@ -311,22 +310,23 @@ func matchesGlobRule(glob, filePath string) bool {
 	return strings.HasPrefix(filePath, prefix)
 }
 
-// GenerateBenchmarkMarkdown formats the benchmark report into GitHub-flavored Markdown.
-func (r *BenchmarkReport) GenerateBenchmarkMarkdown() string {
+// GenerateScenarioAnalysisMarkdown formats the scenario analysis report into GitHub-flavored Markdown.
+func (r *ScenarioAnalysisReport) GenerateScenarioAnalysisMarkdown() string {
 	var sb strings.Builder
-	sb.WriteString("# Empirical Evaluation Results: GitScars vs Scoped Rules vs Monolith\n\n")
-	sb.WriteString("Empirical replay benchmark executed across **10 production regression scenarios** (Go, Python, TypeScript).\n\n")
-	sb.WriteString("## Executive Summary\n\n")
-	sb.WriteString("| Evaluation Metric | Monolithic (`AGENTS.md`) | Glob-Scoped (`.cursor/rules`) | **GitScars (`git-scars`)** | Advantage |\n")
-	sb.WriteString("| :--- | :--- | :--- | :--- | :--- |\n")
-	sb.WriteString(fmt.Sprintf("| **Average Prompt Tokens / Task** | `%.0f` tokens | `%.0f` tokens | **`%.0f` tokens** | **-%.1f%% vs Scoped** (-%.1f%% vs Monolith) |\n",
-		r.MonolithicArm.AverageTokensPerTask, r.ScopedRulesArm.AverageTokensPerTask, r.GitScarsArm.AverageTokensPerTask, r.TokenSavingsVsScop, r.TokenSavingsVsMono))
-	sb.WriteString(fmt.Sprintf("| **Drift Detection Sensitivity** | `%.0f%%` (Silent failure) | `%.0f%%` (Silent failure) | **`%.0f%%` (Deterministic)** | **Catches file & symbol refactors** |\n",
-		r.MonolithicArm.DriftDetectionRate*100, r.ScopedRulesArm.DriftDetectionRate*100, r.GitScarsArm.DriftDetectionRate*100))
-	sb.WriteString(fmt.Sprintf("| **Toxic / Broken Rule Prevention** | `%.0f%%` (Unverified) | `%.0f%%` (Unverified) | **`%.0f%%` (Fail-to-Pass gate)** | **Blocks invalid assertions** |\n",
-		r.MonolithicArm.ToxicClaimRejectionRate*100, r.ScopedRulesArm.ToxicClaimRejectionRate*100, r.GitScarsArm.ToxicClaimRejectionRate*100))
-	sb.WriteString(fmt.Sprintf("| **Top-1 Retrieval Precision** | `%.0f%%` | `%.0f%%` | **`%.0f%%`** | **Zero attention dilution** |\n\n",
-		r.MonolithicArm.PrecisionAt1*100, r.ScopedRulesArm.PrecisionAt1*100, r.GitScarsArm.PrecisionAt1*100))
+	sb.WriteString("# Design Estimates & Illustrative Scenario Analysis: GitScars vs Scoped Rules vs Monolith\n\n")
+	sb.WriteString("> [!NOTE]\n")
+	sb.WriteString("> **Methodology & Scope Disclaimer**: This document presents a **deterministic prompt token budget analysis and illustrative scenario walkthrough** across 10 representative regression patterns (Go, Python, TypeScript).\n")
+	sb.WriteString("> - **What is modeled**: Exact heuristic token counts (`len(text)/4`) comparing monolithic prompt injection, glob-scoped directory injection, and GitScars budgeted XML injection.\n")
+	sb.WriteString("> - **What is NOT measured here**: Downstream LLM agent task success rates and repeat rates. In accordance with [EVAL_PLAN.md](EVAL_PLAN.md), empirical agent repeat-rate evaluation requires a multi-agent trial harness ($\\ge 900$ task evaluations for statistical significance); no synthetic agent metrics are reported here.\n\n")
+	sb.WriteString("## Executive Summary: Strategy & Modeled Token Overhead\n\n")
+	sb.WriteString("| Strategy | Prompt Injection Mechanism | Average Estimated Tokens / Task | Token Difference vs GitScars | Drift Detection Guarantee | Rule Quality Gate |\n")
+	sb.WriteString("| :--- | :--- | :--- | :--- | :--- | :--- |\n")
+	sb.WriteString(fmt.Sprintf("| Monolithic (`AGENTS.md`) | Unconditional full dump of all rules | `%.0f` tokens | +%.1f%% | None (silent obsolescence) | None (unverified text claims) |\n",
+		r.MonolithicArm.AverageTokensPerTask, ((r.MonolithicArm.AverageTokensPerTask-r.GitScarsArm.AverageTokensPerTask)/r.GitScarsArm.AverageTokensPerTask)*100))
+	sb.WriteString(fmt.Sprintf("| Glob-Scoped (`.cursor/rules`) | Path-scoped glob match (dumps co-located rules) | `%.0f` tokens | +%.1f%% | None (silent failure on move) | None (unverified text claims) |\n",
+		r.ScopedRulesArm.AverageTokensPerTask, ((r.ScopedRulesArm.AverageTokensPerTask-r.GitScarsArm.AverageTokensPerTask)/r.GitScarsArm.AverageTokensPerTask)*100))
+	sb.WriteString(fmt.Sprintf("| **GitScars (`git-scars`)** | Selective multi-signal match under `--budget 400` | **`%.0f` tokens** | **Baseline (-%.1f%% vs Scoped)** | Deterministic SHA & AST symbol hash | Scrubbed fail-to-pass test execution |\n\n",
+		r.GitScarsArm.AverageTokensPerTask, r.TokenSavingsVsScop))
 
 	sb.WriteString("## Scenario-by-Scenario Measurements\n\n")
 	sb.WriteString("| Scenario ID | Target Anchor | Monolith Tokens | Scoped Rule Tokens | GitScars Tokens | Relevance Score | Savings vs Scoped |\n")
@@ -363,6 +363,16 @@ func (r *BenchmarkReport) GenerateBenchmarkMarkdown() string {
 	sb.WriteString("- **GitScars Outcome**: Budgeted injection (`--budget 400`) scores multi-signal anchors, delivering only the exact HTTP response body leak guardrail (285 tokens, -88% overhead).\n")
 
 	return sb.String()
+}
+
+// GenerateBenchmarkMarkdown aliases GenerateScenarioAnalysisMarkdown for backwards compatibility.
+func (r *ScenarioAnalysisReport) GenerateBenchmarkMarkdown() string {
+	return r.GenerateScenarioAnalysisMarkdown()
+}
+
+// RunScenarioAnalysis runs the scenario prompt footprint analysis.
+func RunScenarioAnalysis() *ScenarioAnalysisReport {
+	return RunBenchmarkEvaluation()
 }
 
 func getScenarioFile(id string) string {

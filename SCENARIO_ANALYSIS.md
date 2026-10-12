@@ -1,15 +1,17 @@
-# Empirical Evaluation Results: GitScars vs Scoped Rules vs Monolith
+# Design Estimates & Illustrative Scenario Analysis: GitScars vs Scoped Rules vs Monolith
 
-Empirical replay benchmark executed across **10 production regression scenarios** (Go, Python, TypeScript).
+> [!NOTE]
+> **Methodology & Scope Disclaimer**: This document presents a **deterministic prompt token budget analysis and illustrative scenario walkthrough** across 10 representative regression patterns (Go, Python, TypeScript).
+> - **What is modeled**: Exact heuristic token counts (`len(text)/4`) comparing monolithic prompt injection, glob-scoped directory injection, and GitScars budgeted XML injection.
+> - **What is NOT measured here**: Downstream LLM agent task success rates and repeat rates. In accordance with [EVAL_PLAN.md](EVAL_PLAN.md), empirical agent repeat-rate evaluation requires a multi-agent trial harness ($\ge 900$ task evaluations for statistical significance); no synthetic agent metrics are reported here.
 
-## Executive Summary
+## Executive Summary: Strategy & Modeled Token Overhead
 
-| Evaluation Metric | Monolithic (`AGENTS.md`) | Glob-Scoped (`.cursor/rules`) | **GitScars (`git-scars`)** | Advantage |
-| :--- | :--- | :--- | :--- | :--- |
-| **Average Prompt Tokens / Task** | `871` tokens | `187` tokens | **`133` tokens** | **-28.9% vs Scoped** (-84.7% vs Monolith) |
-| **Drift Detection Sensitivity** | `0%` (Silent failure) | `0%` (Silent failure) | **`100%` (Deterministic)** | **Catches file & symbol refactors** |
-| **Toxic / Broken Rule Prevention** | `0%` (Unverified) | `0%` (Unverified) | **`100%` (Fail-to-Pass gate)** | **Blocks invalid assertions** |
-| **Top-1 Retrieval Precision** | `10%` | `55%` | **`100%`** | **Zero attention dilution** |
+| Strategy | Prompt Injection Mechanism | Average Estimated Tokens / Task | Token Difference vs GitScars | Drift Detection Guarantee | Rule Quality Gate |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| Monolithic (`AGENTS.md`) | Unconditional full dump of all rules | `871` tokens | +554.4% | None (silent obsolescence) | None (unverified text claims) |
+| Glob-Scoped (`.cursor/rules`) | Path-scoped glob match (dumps co-located rules) | `187` tokens | +40.7% | None (silent failure on move) | None (unverified text claims) |
+| **GitScars (`git-scars`)** | Selective multi-signal match under `--budget 400` | **`133` tokens** | **Baseline (-28.9% vs Scoped)** | Deterministic SHA & AST symbol hash | Scrubbed fail-to-pass test execution |
 
 ## Scenario-by-Scenario Measurements
 

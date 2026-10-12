@@ -50,14 +50,15 @@ Repository knowledge frequently disappears into old commits, closed pull request
 
 | Capability | Monolithic (`AGENTS.md`) | Glob-Scoped (`.cursor/rules`) | Vector Memory (RAG) | **GitScars (`git-scars`)** |
 | :--- | :--- | :--- | :--- | :--- |
-| **Context Overhead** | Linear prompt bloat (`871` tokens) | Co-located glob dump (`187` tokens) | Retrieval tokens + vector DB | **`133` tokens avg (-28.9% vs Scoped, -84.7% vs Mono)** |
-| **Drift Sensitivity** | 0% (Silent obsolescence) | 0% (Silent failure on refactor) | 0% (Unanchored) | **100% (Deterministic file SHA & AST symbol hash)** |
-| **Verification Gate** | Unverified claims | Unverified claims | None | **Scrubbed fail-to-pass test execution** |
-| **Retrieval Precision** | 10% (Loaded indiscriminately) | 55% (Co-located noise) | Variable (Semantic hallucination) | **100% (Multi-signal exact anchor resolution)** |
-| **Host Isolation Boundary** | N/A (Text-only) | N/A (Text-only) | Cloud API risk | **Scrubbed host env (`cleanEnv()`) + trust-hash gate** |
+| **Prompt Strategy** | Unconditional full dump | Directory glob pattern match | Semantic similarity search | Selective multi-signal anchor match |
+| **Average Prompt Tokens** | `871` tokens (all rules) | `187` tokens avg (directory rules) | Dynamic retrieval | **`133` tokens avg (-28.9% vs Scoped)** |
+| **Drift Detection** | None (silent obsolescence) | None (silent failure on move) | None (unanchored) | **Deterministic SHA-256 & AST symbol hashing** |
+| **Verification Gate** | Unverified text assertions | Unverified text assertions | None | **Scrubbed fail-to-pass test execution** |
+| **Human Governance** | Ad-hoc edits | Ad-hoc edits | None | **Promotion gate (`git-scars promote`)** |
+| **Host Security Boundary** | Static text | Static text | Cloud API / embeddings | **Host `argv` execution (`cleanEnv()`) + trust-hash** |
 | **Runtime Dependencies** | Offline text | Offline text | Remote embeddings / DB | **Zero dependencies (pure Go single binary)** |
 
-*For scenario-by-scenario empirical benchmark results across Go, Python, and TypeScript, see [EVAL_RESULTS.md](EVAL_RESULTS.md).*
+*For scenario-by-scenario modeled token measurements and architectural case walkthroughs, see [SCENARIO_ANALYSIS.md](SCENARIO_ANALYSIS.md).*
 
 ---
 
@@ -65,7 +66,7 @@ Repository knowledge frequently disappears into old commits, closed pull request
 
 Glob-scoped rules (such as Cursor `.cursor/rules/*.mdc` or nested directory `CLAUDE.md` files) provide path-scoping out of the box. Why is GitScars necessary when path-scoping already exists?
 
-In our empirical evaluation across 10 production regression scenarios ([EVAL_RESULTS.md](EVAL_RESULTS.md)), scoped rules fail in three critical production scenarios:
+In our scenario walkthrough across 10 production regression patterns ([SCENARIO_ANALYSIS.md](SCENARIO_ANALYSIS.md)), scoped rules fail in three critical production scenarios:
 
 ### 1. The Refactored Anchor (Silent Failure)
 - **Failure**: When code is moved or refactored (e.g., `services/billing/calc.py` becomes `core/pricing/calc.py`), glob rules silently stop firing. If obsolete files remain, they fire on dead code. Scoped rules have **0% drift detection**.
@@ -604,10 +605,10 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 
 ## Documentation & ADRs
 
-- [EVAL_RESULTS.md](EVAL_RESULTS.md): Empirical benchmark evaluation results across 10 regression replays comparing GitScars, glob-scoped rules, and monolithic rules.
+- [SCENARIO_ANALYSIS.md](SCENARIO_ANALYSIS.md): Design estimates and illustrative scenario walkthrough across 10 regression patterns comparing prompt token footprints and architectural failure modes.
 - [EVAL_PLAN.md](EVAL_PLAN.md): Preregistered benchmark evaluation plan, scoring baseline weights, and power calculations.
 - [PRIOR_ART.md](PRIOR_ART.md): Primary-source comparative analysis (`Daily-Nerd/Scar`, `fscars`, `gitmem`, arXiv:2609.23570).
-- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0013).
+- [DECISIONS.md](DECISIONS.md): Architecture Decision Records (ADR-0001 through ADR-0014).
 
 ---
 

@@ -16,7 +16,7 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.2.0"
+const version = "1.3.0"
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -1236,6 +1236,9 @@ func runHarvest(store *scar.Store, args []string) error {
 	maxCommits := fs.Int("max", 50, "Maximum recent git commits to scan")
 	since := fs.String("since", "", "Optional Git revision to start scanning from (e.g. HEAD~20, main)")
 	dryRun := fs.Bool("dry-run", false, "Preview candidate fix commits without creating draft scars")
+	allowUntested := fs.Bool("allow-untested", false, "Include candidate fix commits that lack co-located tests")
+	maxFiles := fs.Int("max-files", 5, "Maximum modified files allowed in candidate commit (skips large refactors)")
+	minConfidence := fs.Int("min-confidence", 7, "Minimum quality confidence threshold 1-10 (default: 7)")
 	asJSON := fs.Bool("json", false, "Output results in JSON format")
 
 	if err := fs.Parse(args); err != nil {
@@ -1243,9 +1246,12 @@ func runHarvest(store *scar.Store, args []string) error {
 	}
 
 	res, err := store.HarvestCommits(scar.HarvestOptions{
-		MaxCommits: *maxCommits,
-		SinceRef:   *since,
-		DryRun:     *dryRun,
+		MaxCommits:    *maxCommits,
+		SinceRef:      *since,
+		DryRun:        *dryRun,
+		AllowUntested: *allowUntested,
+		MaxFiles:      *maxFiles,
+		MinConfidence: *minConfidence,
 	})
 	if err != nil {
 		return fmt.Errorf("harvest failed: %w", err)
@@ -1261,30 +1267,37 @@ func runHarvest(store *scar.Store, args []string) error {
 	}
 
 	fmt.Println("=== GitScars Regression Harvest ===")
-	fmt.Printf("Scanned Commits: %d | Discovered Fixes: %d | Drafts Created: %d\n\n",
+	fmt.Printf("Scanned Commits: %d | Qualified Fixes: %d | Drafts Created: %d\n\n",
 		res.ScannedCommits, res.FoundFixes, res.DraftsCreated)
 
 	if len(res.Candidates) == 0 {
-		fmt.Println("No candidate bug-fix commits found in scanned history.")
+		fmt.Println("No qualified high-confidence bug-fix commits found in scanned history.")
 		return nil
 	}
 
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 3, ' ', 0)
-	fmt.Fprintln(w, "COMMIT\tSUGGESTED ID\tFILES\tSUBJECT")
+	fmt.Fprintln(w, "COMMIT\tCONF\tFILES\tVERIFIER\tSUBJECT")
 	for _, c := range res.Candidates {
 		shortSha := c.CommitSHA
 		if len(shortSha) > 8 {
 			shortSha = shortSha[:8]
 		}
 		files := strings.Join(c.Files, ",")
-		if len(files) > 25 {
-			files = files[:22] + "..."
+		if len(files) > 22 {
+			files = files[:19] + "..."
+		}
+		verifier := "-"
+		if len(c.Verifier) > 0 {
+			verifier = strings.Join(c.Verifier, " ")
+			if len(verifier) > 25 {
+				verifier = verifier[:22] + "..."
+			}
 		}
 		subj := c.Subject
-		if len(subj) > 40 {
-			subj = subj[:37] + "..."
+		if len(subj) > 35 {
+			subj = subj[:32] + "..."
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", shortSha, c.SuggestedID, files, subj)
+		fmt.Fprintf(w, "%s\t%d/10\t%s\t%s\t%s\n", shortSha, c.Confidence, files, verifier, subj)
 	}
 	_ = w.Flush()
 

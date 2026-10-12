@@ -252,11 +252,11 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 				return FreshnessUnavailable
 			}
 			if currentHash != expectedHash {
-				// Fine-grained AST check: if anchored symbols are recorded and unchanged, preserve current status
-				if len(scar.Baseline.SymbolHashes) > 0 && strings.HasSuffix(relPath, ".go") {
+				// Fine-grained symbol check: if anchored symbols are recorded and unchanged, preserve current status
+				if len(scar.Baseline.SymbolHashes) > 0 && IsSupportedSymbolFile(relPath) {
 					allPreserved := true
 					for sym, baselineHash := range scar.Baseline.SymbolHashes {
-						currSymHash, err := ExtractGoSymbolHash(fullPath, sym)
+						currSymHash, err := ExtractSymbolHash(fullPath, sym)
 						if err != nil || currSymHash != baselineHash {
 							allPreserved = false
 							break
@@ -313,17 +313,17 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 	}
 
 	if hasChanged {
-		// Fine-grained AST symbol verification across modified files
+		// Fine-grained symbol verification across modified files
 		if len(scar.Baseline.SymbolHashes) > 0 {
 			allPreserved := true
 			for sym, baselineHash := range scar.Baseline.SymbolHashes {
 				found := false
 				for _, f := range scar.Anchors.Files {
-					if !strings.HasSuffix(f, ".go") {
+					if !IsSupportedSymbolFile(f) {
 						continue
 					}
 					fullPath := filepath.Join(s.RepoRoot, f)
-					currSymHash, err := ExtractGoSymbolHash(fullPath, sym)
+					currSymHash, err := ExtractSymbolHash(fullPath, sym)
 					if err == nil {
 						found = true
 						if currSymHash != baselineHash {

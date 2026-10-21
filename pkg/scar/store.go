@@ -400,25 +400,22 @@ func hashFile(path string) (string, error) {
 
 // RecordBaseline calculates current hashes of anchor files and updates the scar's baseline.
 func (s *Store) RecordBaseline(scar *Scar, commandHash string) error {
-	if scar.Baseline.AnchorHashes == nil {
-		scar.Baseline.AnchorHashes = make(map[string]string)
-	}
-
-	scar.Baseline.RecordedAt = time.Now().UTC().Format(time.RFC3339)
-
+	// The baseline is replaced rather than merged. A scar that is re-anchored
+	// must not stay coupled to a file it no longer references.
+	anchorHashes := make(map[string]string)
 	for _, f := range scar.Anchors.Files {
 		fullPath := filepath.Join(s.RepoRoot, f)
 		h, err := hashFile(fullPath)
 		if err == nil {
-			scar.Baseline.AnchorHashes[f] = h
+			anchorHashes[f] = h
 		}
 	}
+	scar.Baseline.AnchorHashes = anchorHashes
+
+	scar.Baseline.RecordedAt = time.Now().UTC().Format(time.RFC3339)
 
 	// Compute and record fine-grained AST symbol baselines
-	symHashes := s.ComputeSymbolBaselines(scar)
-	if len(symHashes) > 0 {
-		scar.Baseline.SymbolHashes = symHashes
-	}
+	scar.Baseline.SymbolHashes = s.ComputeSymbolBaselines(scar)
 
 	if commandHash != "" {
 		scar.Baseline.CommandHash = commandHash

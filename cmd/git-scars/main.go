@@ -331,7 +331,18 @@ func runVerify(store *scar.Store, args []string) error {
 	}
 
 	ctx := context.Background()
-	outcome, verifyErr := store.VerifyFailToPass(ctx, s, nil, *interactive)
+
+	// The fail-to-pass procedure overlays the test files of the fix commit onto
+	// the base commit. Without them the base would simply run the tests that
+	// already existed, which is not a reproduction of the regression.
+	var testFiles []string
+	if s.FixCommit != "" {
+		if info, err := scar.InspectCommit(store.RepoRoot, s.FixCommit); err == nil {
+			testFiles = info.TestFiles
+		}
+	}
+
+	outcome, verifyErr := store.VerifyFailToPass(ctx, s, testFiles, *interactive)
 	if verifyErr != nil {
 		fmt.Fprintf(os.Stderr, "verification notice: %v\n", verifyErr)
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -149,6 +150,96 @@ func TestSplitFileListAcceptsCommasAndNewlines(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestVerifyOverlaysFixCommitTestsToReproduceRegression verifies that the
+// fail-to-pass procedure genuinely reproduces the regression. The base commit
+// carries the failing test, the fix commit carries the correction, and the
+// verification must observe the failure at the base and the pass at the fix.
+func TestVerifyOverlaysFixCommitTestsToReproduceRegression(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=test", "GIT_AUTHOR_EMAIL=test@example.com",
+			"GIT_COMMITTER_NAME=test", "GIT_COMMITTER_EMAIL=test@example.com",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	write := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(tmpDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("failed creating dir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatalf("failed writing %s: %v", rel, err)
+		}
+	}
+
+	git("init", "-q")
+	git("config", "user.email", "test@example.com")
+	git("config", "user.name", "test")
+
+	write("go.mod", "module example.com/demo\n\ngo 1.26\n")
+	write("pkg/value.go", "package pkg\n\nfunc Value() int { return 1 }\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := git("rev-parse", "HEAD")
+
+	// The fix corrects the implementation and introduces the regression test.
+	// The test only exists in the fix commit, so it is only present at the base
+	// when the verification overlays it.
+	write("pkg/value.go", "package pkg\n\nfunc Value() int { return 2 }\n")
+	write("pkg/value_test.go", "package pkg\n\nimport \"testing\"\n\nfunc TestValue(t *testing.T) {\n\tif Value() != 2 {\n\t\tt.Fatalf(\"expected 2, got %d\", Value())\n\t}\n}\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "fix")
+	fix := git("rev-parse", "HEAD")
+
+	scarsDir := filepath.Join(tmpDir, ".gitscars", "scars")
+	if err := os.MkdirAll(scarsDir, 0755); err != nil {
+		t.Fatalf("failed creating scars dir: %v", err)
+	}
+	doc := "---\n" +
+		"schema_version: \"1\"\n" +
+		"id: \"regression-repro\"\n" +
+		"title: \"Regression reproduction\"\n" +
+		"lesson: \"Value returned the wrong result\"\n" +
+		"base_commit: \"" + base + "\"\n" +
+		"fix_commit: \"" + fix + "\"\n" +
+		"anchors:\n  files:\n    - \"pkg/value.go\"\n" +
+		"verifier:\n  result: \"not_attempted\"\n  argv:\n    - \"go\"\n    - \"test\"\n    - \"./...\"\n" +
+		"lifecycle:\n  state: \"draft\"\n---\n"
+	if err := os.WriteFile(filepath.Join(scarsDir, "regression-repro.md"), []byte(doc), 0644); err != nil {
+		t.Fatalf("failed writing scar: %v", err)
+	}
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"verify", "regression-repro", "--interactive"}); err != nil {
+		t.Fatalf("expected the verification to reproduce the regression, got: %v", err)
+	}
+
+	store := scar.NewStore(tmpDir)
+	verified, _, err := store.LoadScar("regression-repro")
+	if err != nil {
+		t.Fatalf("failed loading verified scar: %v", err)
+	}
+	if verified.Verifier.Result != scar.VerificationFailToPass {
+		t.Errorf("expected result %s, got %s", scar.VerificationFailToPass, verified.Verifier.Result)
 	}
 }
 

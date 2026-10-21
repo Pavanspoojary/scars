@@ -10,7 +10,7 @@ Only the latest release and the current `main` branch receive security patches.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability within `si-scars`, please report it responsibly:
+If you discover a security vulnerability within `git-scars`, please report it responsibly:
 
 1. **Do not** open a public issue or discuss the vulnerability publicly.
 2. Report security concerns via GitHub Private Vulnerability Reporting on the repository (Security tab -> Advisory -> Report a vulnerability).

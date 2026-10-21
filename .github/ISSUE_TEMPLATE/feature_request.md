@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea or architectural improvement for si-scars
+about: Suggest an idea or architectural improvement for git-scars
 title: '[FEAT] '
 labels: enhancement
 assignees: ''

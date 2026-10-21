@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-This document tracks significant design choices, trade-offs, evaluated alternatives, and rationale for `si-scars`.
+This document tracks significant design choices, trade-offs, evaluated alternatives, and rationale for `git-scars`.
 
 ---
 
@@ -22,7 +22,7 @@ This document tracks significant design choices, trade-offs, evaluated alternati
 
 - **Date**: 2026-10-11
 - **Status**: Accepted
-- **Context**: Selecting the open-source license for `si-scars`. Evaluated Apache 2.0, MIT, and MPL-2.0.
+- **Context**: Selecting the open-source license for `git-scars`. Evaluated Apache 2.0, MIT, and MPL-2.0.
 - **Decision**:
   - Retain and confirm the **Apache License 2.0**.
 - **Consequences**:
@@ -34,7 +34,7 @@ This document tracks significant design choices, trade-offs, evaluated alternati
 
 - **Date**: 2026-10-11
 - **Status**: Accepted
-- **Context**: Stage 0a namespace evaluation to avoid collisions across GitHub, package registries, and developer tooling (specifically `scar-cli`, `fscars`, and `gitmem`).
+- **Context**: Stage 0a namespace evaluation to avoid collisions across GitHub, package registries, and developer tooling (specifically `scar-cli`, `fscars`, and `gitmem`). The repository was previously named `si-scars` under that working title, and earlier records refer to the project by that name.
 - **Decision**:
   - Adopt **`git-scars`** as the canonical CLI binary name and package namespace.
   - Adopt **`.gitscars/`** as the repository metadata directory containing committed scars (`.gitscars/scars/`) and gitignored local state (`.gitscars/.local/`).

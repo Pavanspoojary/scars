@@ -21,7 +21,7 @@ A clear and concise description of what you expected to happen.
 **Environment:**
 - OS: [e.g. macOS, Linux, Windows]
 - Go Version: [e.g. 1.22]
-- si-scars Version or Commit:
+- git-scars Version or Commit:
 
 **Additional context**
 Add any other context about the problem here (remember to redact private tokens/keys).

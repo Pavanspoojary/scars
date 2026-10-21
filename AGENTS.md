@@ -1,6 +1,6 @@
 # Agent Guidelines and Repository Standards
 
-This document establishes the repository-wide standards and operational rules for all AI agents and automated contributors working in `si-scars`.
+This document establishes the repository-wide standards and operational rules for all AI agents and automated contributors working in `git-scars`.
 
 ---
 

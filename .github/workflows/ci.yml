@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  security-events: write
 
 jobs:
   build:
@@ -50,4 +51,37 @@ jobs:
           /tmp/git-scars lint
           /tmp/git-scars check
           /tmp/git-scars doctor
+
+      - name: Collect guardrail matches on changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          go build -o /tmp/git-scars ./cmd/git-scars
+          if [ -n "$BASE_SHA" ]; then
+            git diff --name-only "$BASE_SHA...HEAD" > /tmp/changed.txt
+          else
+            git diff --name-only HEAD~1...HEAD > /tmp/changed.txt
+          fi
+          if [ -s /tmp/changed.txt ]; then
+            /tmp/git-scars enforce --files "$(cat /tmp/changed.txt)" --fail-on high --format sarif > git-scars.sarif || true
+          fi
+
+      - name: Collect freshness findings
+        run: |
+          go build -o /tmp/git-scars ./cmd/git-scars
+          /tmp/git-scars check --format sarif > git-scars-check.sarif || true
+
+      - name: Upload guardrail annotations
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: git-scars.sarif
+          category: git-scars-guardrails
+
+      - name: Upload freshness annotations
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: git-scars-check.sarif
+          category: git-scars-freshness
 

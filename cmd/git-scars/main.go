@@ -16,6 +16,12 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
+// HealCommandFailedExitCode is returned by 'git-scars heal' when the observed
+// command failed. The observed command's own exit code is reported in the
+// heal output, but it is not reused as the exit code of git-scars, because
+// exit code 1 already means an operational error of git-scars itself.
+const HealCommandFailedExitCode = 4
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -205,6 +211,21 @@ func runInit(store *scar.Store, args []string) error {
 	return nil
 }
 
+// splitFileList splits a list of paths separated by commas or newlines. The
+// newline form allows a file list to be piped directly from a git command.
+func splitFileList(s string) []string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func runAdd(store *scar.Store, args []string) error {
 	if len(args) > 0 && args[0] == "from-commit" {
 		if len(args) < 2 {
@@ -258,15 +279,7 @@ func runAdd(store *scar.Store, args []string) error {
 		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\"), interactive mode (-i), or add from-commit <sha>")
 	}
 
-	var files []string
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				files = append(files, f)
-			}
-		}
-	}
+	files := splitFileList(*filesStr)
 
 	var deps []scar.DependencyAnchor
 	if *depsStr != "" {
@@ -591,8 +604,8 @@ func runRecall(store *scar.Store, args []string) error {
 	useStdin := fs.Bool("stdin", false, "Read error output or stack trace from stdin")
 	includeStale := fs.Bool("include-stale", false, "Include changed or unbaselined scars in search candidates")
 	asJSON := fs.Bool("json", false, "Emit versioned reposcars.recall.v1 JSON")
-	threshold := fs.Int("threshold", 3, "Abstain threshold score")
-	topK := fs.Int("top-k", 3, "Maximum scars to return")
+	threshold := fs.Int("threshold", 0, "Abstain threshold score (0 uses the configured value)")
+	topK := fs.Int("top-k", 0, "Maximum scars to return (0 uses the configured value)")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -606,13 +619,7 @@ func runRecall(store *scar.Store, args []string) error {
 		TopK:         *topK,
 	}
 
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			if f = strings.TrimSpace(f); f != "" {
-				opts.Files = append(opts.Files, f)
-			}
-		}
-	}
+	opts.Files = splitFileList(*filesStr)
 	if *symbolsStr != "" {
 		for _, s := range strings.Split(*symbolsStr, ",") {
 			if s = strings.TrimSpace(s); s != "" {
@@ -879,10 +886,10 @@ func runDiff(store *scar.Store, args []string) error {
 	for _, res := range results {
 		switch res.Status {
 		case "current":
-			fmt.Printf("✓ [current] %s\n", res.FilePath)
+			fmt.Printf("[current] %s\n", res.FilePath)
 		case "modified":
 			allCurrent = false
-			fmt.Printf("✗ [MODIFIED] %s:\n%s\n", res.FilePath, res.Diff)
+			fmt.Printf("[MODIFIED] %s:\n%s\n", res.FilePath, res.Diff)
 		case "missing":
 			allCurrent = false
 			fmt.Printf("! [MISSING] %s\n", res.FilePath)
@@ -902,20 +909,24 @@ func runDiff(store *scar.Store, args []string) error {
 }
 
 func runStats(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "Emit machine-readable JSON metrics")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	stats, err := store.GetStats()
 	if err != nil {
 		return err
 	}
 
-	for _, a := range args {
-		if a == "--json" {
-			data, err := json.MarshalIndent(stats, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(data))
-			return nil
+	if *asJSON {
+		data, err := json.MarshalIndent(stats, "", "  ")
+		if err != nil {
+			return err
 		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	fmt.Println("=== GitScars Repository Statistics ===")
@@ -959,7 +970,7 @@ func runDoctor(store *scar.Store, args []string) error {
 		} else {
 			fmt.Println("Applied automated repairs:")
 			for _, act := range actions {
-				fmt.Printf("  ✓ %s\n", act)
+				fmt.Printf("  [ok] %s\n", act)
 			}
 			fmt.Println()
 		}
@@ -981,14 +992,14 @@ func runDoctor(store *scar.Store, args []string) error {
 
 	fmt.Println("=== GitScars System Diagnostics ===")
 	for _, c := range report.Checks {
-		symbol := "✓"
+		symbol := "ok"
 		switch c.Status {
 		case "OK":
-			symbol = "✓"
+			symbol = "ok"
 		case "WARN":
-			symbol = "!"
+			symbol = "warn"
 		case "FAIL":
-			symbol = "✗"
+			symbol = "fail"
 		}
 		fmt.Printf("[%s] %-22s %s\n", symbol, c.Name+":", c.Message)
 		for _, d := range c.Details {
@@ -1018,15 +1029,7 @@ func runInject(store *scar.Store, args []string) error {
 		return err
 	}
 
-	var files []string
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				files = append(files, f)
-			}
-		}
-	}
+	files := splitFileList(*filesStr)
 
 	var symbols []string
 	if *symbolsStr != "" {
@@ -1172,11 +1175,7 @@ func runEnforce(store *scar.Store, args []string) error {
 
 	var files []string
 	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			if f = strings.TrimSpace(f); f != "" {
-				files = append(files, f)
-			}
-		}
+		files = splitFileList(*filesStr)
 	}
 
 	if *staged && scar.GitAvailable(store.RepoRoot) {
@@ -1465,18 +1464,18 @@ func runHeal(store *scar.Store, args []string) error {
 		}
 		fmt.Println(string(data))
 		if !report.Success {
-			os.Exit(report.ExitCode)
+			os.Exit(HealCommandFailedExitCode)
 		}
 		return nil
 	}
 
 	if report.Success {
-		fmt.Printf("✓ Command %q succeeded in %dms (exit code 0)\n",
+		fmt.Printf("Command %q succeeded in %dms (exit code 0)\n",
 			strings.Join(report.Command, " "), report.DurationMs)
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "✗ Command %q failed with exit code %d (%dms)\n",
+	fmt.Fprintf(os.Stderr, "Command %q failed with exit code %d (%dms)\n",
 		strings.Join(report.Command, " "), report.ExitCode, report.DurationMs)
 
 	if report.Language != "" || report.FailureKind != "" {
@@ -1513,7 +1512,7 @@ func runHeal(store *scar.Store, args []string) error {
 		fmt.Fprintf(os.Stderr, "Suggested Verification: %s\n", report.SuggestedCommand)
 	}
 
-	os.Exit(report.ExitCode)
+	os.Exit(HealCommandFailedExitCode)
 	return nil
 }
 

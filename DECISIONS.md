@@ -1,6 +1,6 @@
 # Architecture Decision Records (ADR)
 
-This document tracks significant design choices, trade-offs, evaluated alternatives, and rationale for `si-scars`.
+This document tracks significant design choices, trade-offs, evaluated alternatives, and rationale for `git-scars`.
 
 ---
 
@@ -22,7 +22,7 @@ This document tracks significant design choices, trade-offs, evaluated alternati
 
 - **Date**: 2026-10-11
 - **Status**: Accepted
-- **Context**: Selecting the open-source license for `si-scars`. Evaluated Apache 2.0, MIT, and MPL-2.0.
+- **Context**: Selecting the open-source license for `git-scars`. Evaluated Apache 2.0, MIT, and MPL-2.0.
 - **Decision**:
   - Retain and confirm the **Apache License 2.0**.
 - **Consequences**:
@@ -34,7 +34,7 @@ This document tracks significant design choices, trade-offs, evaluated alternati
 
 - **Date**: 2026-10-11
 - **Status**: Accepted
-- **Context**: Stage 0a namespace evaluation to avoid collisions across GitHub, package registries, and developer tooling (specifically `scar-cli`, `fscars`, and `gitmem`).
+- **Context**: Stage 0a namespace evaluation to avoid collisions across GitHub, package registries, and developer tooling (specifically `scar-cli`, `fscars`, and `gitmem`). The repository was previously named `si-scars` under that working title, and earlier records refer to the project by that name.
 - **Decision**:
   - Adopt **`git-scars`** as the canonical CLI binary name and package namespace.
   - Adopt **`.gitscars/`** as the repository metadata directory containing committed scars (`.gitscars/scars/`) and gitignored local state (`.gitscars/.local/`).
@@ -301,4 +301,35 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Invalid guardrails are excluded from retrieval instead of being injected into agent prompts.
   - Anchor drift that previously passed silently is now reported by `check`, `lint`, and `doctor`.
   - The stricter invariant rejects records that were previously accepted, which is a breaking change for any repository holding active scars whose recorded hash does not match their argv. The release is therefore versioned as a major increment.
+
+---
+
+## ADR-0018: Operational Consistency of Configuration, Output, and Continuous Integration
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - `git-scars init` wrote `.gitscars/config.yaml`, but no code ever read it. The abstain threshold and the result limit were hardcoded in the library and duplicated as flag defaults in the CLI, so the file was inert. The repository's own copy had drifted to a stale key set that no longer matched what `init` writes.
+  - The SARIF rule array was built by iterating a map, so the ordering of rules differed between runs and reports of identical findings were not byte-identical.
+  - `git-scars stats` detected its JSON flag by scanning the argument list for a literal string, so `--json=false` produced JSON output and unknown flags were accepted silently.
+  - The heal command reused the observed command's exit code as its own, so a failing test run that exited 1 was indistinguishable from an operational error of git-scars itself.
+  - The MCP server described itself as strictly read-only while the `draft_scar` tool writes a new record, and the `post_failure_learn` tool declared a files argument that was ignored.
+  - Generated guardrail headers and diagnostic output contained non-ASCII pictographs, which conflicts with the repository standard requiring ASCII output without emoji.
+  - Continuous integration validated the scar catalog but never evaluated the guardrails against the files a change touched. The pre-edit check existed only as a local hook.
+- **Decision**:
+  - The configuration file supplies the abstain threshold and the result limit. An explicit flag overrides it, a value of zero defers to it, and an unreadable, malformed, or individually unusable value falls back to the defaults rather than failing the command.
+  - SARIF rules are emitted in a stable order, and an empty result set is emitted as an empty array.
+  - Every subcommand parses its flags with the standard flag set.
+  - Heal exits 4 when the observed command failed and 0 when it succeeded. The observed command's own exit code remains in the output.
+  - The MCP server states what it actually does, and `post_failure_learn` passes its files argument into the retrieval query.
+  - Generated and diagnostic output is plain ASCII.
+  - Continuous integration collects the files changed by the event, evaluates them with the pre-edit enforcement check, and uploads the result as SARIF annotations under a dedicated code scanning category. The generated workflow from `git-scars init --ci github` performs the same step.
+  - The file list argument accepts a comma or newline separated list so that it can be piped directly from a git command.
+- **Consequences**:
+  - Repository-scoped retrieval limits are configurable and the configuration file is meaningful.
+  - Reports of identical findings are reproducible, so continuous integration logs and uploaded artefacts no longer churn.
+  - Continuous integration surfaces guardrail matches on the changed lines of a pull request instead of only enforcing them locally.
+  - A failure of the observed command can no longer be mistaken for a failure of git-scars itself.
+  - Output is portable across terminals and fonts, and conforms to the repository standard.
+  - The changes are additive and do not invalidate any recorded scar, so the release is versioned as a minor increment.
 

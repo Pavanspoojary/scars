@@ -193,6 +193,13 @@ func ExtractErrorSignatures(logOutput string) []string {
 
 // TriageError matches a raw error log or panic trace against recorded repository scars.
 func (s *Store) TriageError(logOutput string) (*TriageResult, error) {
+	return s.TriageErrorWithFiles(logOutput, nil)
+}
+
+// TriageErrorWithFiles diagnoses a failure log against the recorded scars and
+// additionally considers the supplied repository files when matching, so that a
+// caller which already knows the affected files can narrow the diagnosis.
+func (s *Store) TriageErrorWithFiles(logOutput string, files []string) (*TriageResult, error) {
 	parsed := ParseFailureLog(logOutput)
 
 	extracted := parsed.NormalizedError
@@ -200,10 +207,15 @@ func (s *Store) TriageError(logOutput string) (*TriageResult, error) {
 		extracted = strings.TrimSpace(logOutput)
 	}
 
+	queryFiles := parsed.Files
+	if len(files) > 0 {
+		queryFiles = append(append([]string{}, queryFiles...), files...)
+	}
+
 	q := QueryOptions{
 		ErrorSignature: extracted,
 		Task:           extracted,
-		Files:          parsed.Files,
+		Files:          queryFiles,
 		Symbols:        parsed.Symbols,
 		IncludeStale:   true, // Failure triage must inspect all active scars
 		Threshold:      2,

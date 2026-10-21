@@ -3,6 +3,7 @@ package scar
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -74,10 +75,27 @@ type SARIFRegion struct {
 	StartLine int `json:"startLine"`
 }
 
+// sortedRules returns the rules in a stable order so that repeated SARIF
+// reports of the same findings are byte-identical. Iterating a map directly
+// produces a different ordering on every run.
+func sortedRules(rulesMap map[string]SARIFRule) []SARIFRule {
+	ids := make([]string, 0, len(rulesMap))
+	for id := range rulesMap {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	rules := make([]SARIFRule, 0, len(ids))
+	for _, id := range ids {
+		rules = append(rules, rulesMap[id])
+	}
+	return rules
+}
+
 // FormatEnforceSARIF formats pre-edit enforcement check results into SARIF 2.1.0 JSON.
 func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 	rulesMap := make(map[string]SARIFRule)
-	var results []SARIFResult
+	results := []SARIFResult{}
 
 	for _, sc := range res.BlockingScars {
 		ruleID := "git-scars/" + sc.Scar.ID
@@ -89,13 +107,13 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 		if _, exists := rulesMap[ruleID]; !exists {
 			mdHelp := fmt.Sprintf("### %s\n\n**Lesson**: %s\n\n", sc.Scar.Title, sc.Scar.Lesson)
 			if sc.Scar.BadPattern != "" {
-				mdHelp += fmt.Sprintf("❌ **Avoid**:\n```\n%s\n```\n\n", sc.Scar.BadPattern)
+				mdHelp += fmt.Sprintf("**Avoid**:\n```\n%s\n```\n\n", sc.Scar.BadPattern)
 			}
 			if sc.Scar.GoodPattern != "" {
-				mdHelp += fmt.Sprintf("✅ **Recommended**:\n```\n%s\n```\n\n", sc.Scar.GoodPattern)
+				mdHelp += fmt.Sprintf("**Recommended**:\n```\n%s\n```\n\n", sc.Scar.GoodPattern)
 			}
 			if len(sc.Scar.Verifier.Argv) > 0 {
-				mdHelp += fmt.Sprintf("🔍 **Verifier**: `%s`\n", strings.Join(sc.Scar.Verifier.Argv, " "))
+				mdHelp += fmt.Sprintf("**Verifier**: `%s`\n", strings.Join(sc.Scar.Verifier.Argv, " "))
 			}
 
 			rulesMap[ruleID] = SARIFRule{
@@ -139,10 +157,7 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 		}
 	}
 
-	var rules []SARIFRule
-	for _, r := range rulesMap {
-		rules = append(rules, r)
-	}
+	rules := sortedRules(rulesMap)
 
 	report := SARIFReport{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
@@ -168,7 +183,7 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 // FormatCheckSARIF formats check command findings and anchor drift into SARIF 2.1.0 JSON.
 func FormatCheckSARIF(scars []ScarSummary, invariantErrors []string) ([]byte, error) {
 	rulesMap := make(map[string]SARIFRule)
-	var results []SARIFResult
+	results := []SARIFResult{}
 
 	for _, item := range scars {
 		sc := item.Scar
@@ -233,10 +248,7 @@ func FormatCheckSARIF(scars []ScarSummary, invariantErrors []string) ([]byte, er
 		})
 	}
 
-	var rules []SARIFRule
-	for _, r := range rulesMap {
-		rules = append(rules, r)
-	}
+	rules := sortedRules(rulesMap)
 
 	report := SARIFReport{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
@@ -294,10 +306,31 @@ jobs:
         run: git-scars check --format sarif > git-scars.sarif
         continue-on-error: true
 
+      - name: Collect guardrail matches on changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            git diff --name-only "$BASE_SHA...HEAD" > /tmp/changed.txt
+          else
+            git diff --name-only HEAD~1...HEAD > /tmp/changed.txt
+          fi
+          if [ -s /tmp/changed.txt ]; then
+            git-scars enforce --files "$(cat /tmp/changed.txt)" --fail-on high --format sarif > git-scars-enforce.sarif || true
+          fi
+
       - name: Upload SARIF report
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: git-scars.sarif
+          category: git-scars-freshness
+
+      - name: Upload guardrail annotations
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: git-scars-enforce.sarif
+          category: git-scars-guardrails
 `
 }

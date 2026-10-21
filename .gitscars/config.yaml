@@ -1,4 +1,4 @@
-# GitScars configuration
-version: 1
-scars_dir: scars
-abstention_threshold: 0.7
+# GitScars Configuration
+schema_version: "1"
+abstain_threshold: 3
+top_k: 3

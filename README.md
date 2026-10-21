@@ -348,6 +348,8 @@ git-scars heal -- go test -race ./...
 git-scars heal --json -- npm test
 ```
 
+The observed command's own exit code is reported in the heal output. `git-scars heal` itself exits `4` when the observed command failed and `0` when it succeeded, so that the failure of the observed command is never confused with an operational error of `git-scars` itself.
+
 ### 19. CI/CD & GitHub Code Scanning SARIF (`git-scars check --format sarif`)
 Integrate GitScars directly into pull request checks and security dashboards using the OASIS SARIF 2.1.0 standard:
 ```bash
@@ -359,6 +361,12 @@ git-scars check --format sarif > git-scars.sarif
 
 # Pre-edit enforcement blocking check in SARIF format
 git-scars enforce --files "pkg/auth.go" --format sarif
+```
+
+Both reports can be uploaded to GitHub Code Scanning under separate categories, so anchor drift and guardrail matches appear as annotations on the changed lines of a pull request. The `--files` argument accepts a comma or newline separated list, so a file list can be piped directly from a git command:
+
+```bash
+git-scars enforce --files "$(git diff --name-only origin/main...HEAD)" --fail-on high --format sarif
 ```
 
 ### 20. Multi-Language AST-Aware Freshness (Go, Python, TypeScript)
@@ -447,13 +455,35 @@ A pseudo-code pattern such as `m[key] = val` cannot be verified and will always 
 
 ---
 
+## Repository Configuration
+
+`.gitscars/config.yaml` holds the repository-scoped retrieval limits and is created by `git-scars init`:
+
+```yaml
+# GitScars Configuration
+schema_version: "1"
+abstain_threshold: 3
+top_k: 3
+```
+
+| Key | Meaning |
+| :--- | :--- |
+| `abstain_threshold` | Minimum score a candidate must reach to be retrieved. Below it, GitScars abstains. |
+| `top_k` | Maximum number of scars returned by a single recall. |
+
+`git-scars recall --threshold` and `--top-k` override the configured values for one invocation. A value of `0` means "use the configured value". A missing, unreadable, or malformed configuration file falls back to the defaults, and an individual value that cannot be interpreted is ignored, so a configuration mistake never blocks retrieval.
+
+Injection, triage, and enforcement deliberately use a more sensitive threshold than the abstain threshold, because a guardrail that is worth injecting is worth surfacing before it reaches the abstain threshold.
+
+---
+
 ## AI Agent Integration & MCP Server
 
 ### 1. Model Context Protocol (MCP) Server
 
 GitScars provides a built-in stdio Model Context Protocol (MCP) server for native integration with coding assistants:
 
-The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata.
+The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata. It never executes verifiers and never modifies an existing scar. The `draft_scar` tool writes a new draft record, which is a creation rather than a change to recorded failure memory.
 
 ```bash
 git-scars mcp
@@ -615,7 +645,7 @@ anchors:
 | `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
 | `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
-| `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
+| `recall` | `--files`, `--diff`, `--stdin`, `--json`, `--threshold`, `--top-k` | Retrieve relevant scars with deterministic multi-signal scoring |
 | `enforce` | `--files`, `[--fail-on, --format, --staged, --json]` | Pre-edit blocking guardrail check (`--format sarif`, exit `0` clean, exit `2` blocked) |
 | `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
@@ -623,14 +653,14 @@ anchors:
 | `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
 | `harvest` | `[--max <n>, --since <ref>, --dry-run, --json]` | Automatically mine bug-fixing commits from Git history into scar drafts |
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
-| `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
+| `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions (exit `4` when the observed command failed) |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
 | `lint` | none | Security, schema, and anchor-semantics audit (checks traversal, injections, unloadable files, anchor drift, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |
-| `mcp` | none | Run read-only stdio Model Context Protocol (MCP) server |
+| `mcp` | none | Run stdio Model Context Protocol (MCP) server |
 | `feedback` | `<id> --rating --notes` | Record retrieval utility feedback (`helpful`, `irrelevant`, `incorrect`) |
 | `version` | none | Print `git-scars` version |
 

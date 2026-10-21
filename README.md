@@ -159,6 +159,8 @@ git-scars verify nil-pointer-dereference-8a1b3f --interactive
 ```
 Computes deterministic command hashes, scrubs the environment, redacts secrets, and tests the worktree.
 
+The command exits `1` when verification does not produce a passable result, so CI pipelines can gate on it. Recorded evidence never promotes a scar on its own: a human reviewer must still run `git-scars promote`.
+
 ### 4. Review and Promote
 Human review is required before a Scar can become active:
 ```bash
@@ -582,7 +584,7 @@ anchors:
 | `show` | `<id>` | Display full metadata, anchors, and body of a scar |
 | `diff` | `<id>` | Inspect unified line diff of anchor files against baseline |
 | `promote` | `<id> --status active` | Promote a scar to active state (enforces review & verifier invariants) |
-| `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence |
+| `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence (exit `1` when verification does not pass) |
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
 | `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
 | `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |

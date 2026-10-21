@@ -320,9 +320,9 @@ func runVerify(store *scar.Store, args []string) error {
 	}
 
 	ctx := context.Background()
-	outcome, err := store.VerifyFailToPass(ctx, s, nil, *interactive)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "verification notice: %v\n", err)
+	outcome, verifyErr := store.VerifyFailToPass(ctx, s, nil, *interactive)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "verification notice: %v\n", verifyErr)
 	}
 
 	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
@@ -336,6 +336,12 @@ func runVerify(store *scar.Store, args []string) error {
 		fmt.Printf("Output excerpt:\n%s\n", s.Verifier.OutputExcerpt)
 	}
 	fmt.Printf("\nNote: Verification recorded. A human reviewer must run 'git-scars promote %s' to approve and activate.\n", s.ID)
+
+	// A verification that did not produce a passable result must be visible to
+	// callers and CI, not reported as a successful command.
+	if verifyErr != nil {
+		return fmt.Errorf("verification did not pass: %w", verifyErr)
+	}
 	return nil
 }
 

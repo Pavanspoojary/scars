@@ -83,6 +83,47 @@ func TestAddWithDependencyAnchors(t *testing.T) {
 	}
 }
 
+func TestVerifyExitCodeReflectsVerificationOutcome(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-verify-exit-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	writeScar := func(id string, argv []string) {
+		t.Helper()
+		doc := "---\nschema_version: \"1\"\nid: \"" + id + "\"\ntitle: \"Verify exit\"\nlesson: \"Lesson\"\nverifier:\n  result: \"not_attempted\"\n  argv:\n"
+		for _, a := range argv {
+			doc += "    - \"" + a + "\"\n"
+		}
+		doc += "lifecycle:\n  state: \"draft\"\n---\n"
+		path := filepath.Join(tmpDir, ".gitscars", "scars", id+".md")
+		if err := os.WriteFile(path, []byte(doc), 0644); err != nil {
+			t.Fatalf("failed writing scar %s: %v", id, err)
+		}
+	}
+
+	writeScar("failing", []string{"false"})
+	if err := run([]string{"verify", "failing", "--interactive"}); err == nil {
+		t.Fatal("expected verify to fail when the verifier command exits non-zero")
+	}
+
+	writeScar("passing", []string{"true"})
+	if err := run([]string{"verify", "passing", "--interactive"}); err != nil {
+		t.Fatalf("expected verify to succeed when the verifier command exits zero, got: %v", err)
+	}
+}
+
 func TestCLIWorkflow(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-cli-test-*")
 	if err != nil {

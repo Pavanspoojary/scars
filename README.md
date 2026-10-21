@@ -438,7 +438,12 @@ A guardrail is only useful while its anchors still describe the code it protects
 | `good_pattern_absent` | `WARNING` | The recorded fix cannot be found, so the anchor likely no longer covers the fixed code. |
 | `missing_severity` | `WARNING` | An active guardrail does not declare a severity, so it cannot be compared against a blocking threshold. |
 
-`bad_pattern` and `good_pattern` must be **literal snippets extracted from the anchored files**. Presence and absence can then be checked deterministically. A pseudo-code pattern such as `m[key] = val` cannot be verified and will always be reported as absent.
+`bad_pattern` and `good_pattern` must be **literal snippets of code**, so that presence and absence can be checked deterministically:
+
+- `good_pattern` is a snippet of the fixed code and must be present in an anchored file.
+- `bad_pattern` is a snippet of the footgun and must be absent from every anchored file.
+
+A pseudo-code pattern such as `m[key] = val` cannot be verified and will always be reported as absent.
 
 ---
 

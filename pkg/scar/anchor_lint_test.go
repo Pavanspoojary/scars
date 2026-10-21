@@ -124,6 +124,29 @@ func TestLintDetectsMissingSeverityOnActiveScar(t *testing.T) {
 	}
 }
 
+func TestLintAcceptsSymbolPresentInFileText(t *testing.T) {
+	dir := t.TempDir()
+	// A symbol that is a variable rather than a declaration still appears in
+	// the file and must not be reported as missing.
+	writeAnchorFile(t, dir, "pkg/worker.go", "package pkg\n\nfunc Worker() {\n\tworkerCount := 4\n\t_ = workerCount\n}\n")
+
+	s := &Scar{
+		SchemaVersion: CurrentSchemaVersion,
+		ID:            "variable-anchor",
+		Title:         "Variable anchor",
+		Lesson:        "Lesson",
+		Anchors:       Anchors{Files: []string{"pkg/worker.go"}, Symbols: []string{"workerCount"}},
+		Verifier:      Verifier{Result: VerificationNotAttempted},
+		Review:        Review{Status: ReviewUnreviewed},
+		Lifecycle:     Lifecycle{State: LifecycleDraft},
+	}
+
+	findings := LintScar(dir, s)
+	if hasRule(findings, "anchor_symbol_missing") {
+		t.Fatalf("expected no anchor_symbol_missing finding for a symbol present in the file, got %+v", findings)
+	}
+}
+
 func hasRule(findings []LintFinding, rule string) bool {
 	for _, f := range findings {
 		if f.Rule == rule {

@@ -182,7 +182,8 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 		}
 
 		cleanTitle := cleanSubjectTitle(subject)
-		lesson := fmt.Sprintf("Prevention lesson derived from fix commit %s by %s: ensure regression checks cover %s.", sha[:min(7, len(sha))], author, strings.Join(prodFiles, ", "))
+		lesson := fmt.Sprintf("Regression fixed in commit %s by %s: %s. Anchored to %s.",
+			sha[:min(7, len(sha))], author, strings.ToLower(cleanTitle[:1])+cleanTitle[1:], strings.Join(prodFiles, ", "))
 
 		candidate := HarvestCandidate{
 			CommitSHA:  sha,
@@ -206,6 +207,10 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 				if len(candidate.Verifier) > 0 {
 					draft.Verifier.Argv = candidate.Verifier
 				}
+				// Record the commits so that the draft can be verified as a
+				// genuine fail-to-pass regression rather than an exception.
+				draft.FixCommit = sha
+				draft.BaseCommit = parentCommit(s.RepoRoot, sha)
 				_, _ = s.SaveScar(draft)
 				candidate.SuggestedID = draft.ID
 				candidate.DraftPath = path
@@ -296,6 +301,18 @@ func isSourceFile(f string) bool {
 	default:
 		return false
 	}
+}
+
+// parentCommit resolves the first parent of a commit, or an empty string when
+// the commit has no parent or cannot be resolved.
+func parentCommit(repoRoot, sha string) string {
+	cmd := exec.Command("git", "rev-parse", "--verify", sha+"^")
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 func cleanSubjectTitle(subject string) string {

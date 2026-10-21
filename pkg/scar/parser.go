@@ -5,10 +5,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 )
+
+// quotedSegmentRegex matches a quoted YAML scalar, either single or double quoted.
+var quotedSegmentRegex = regexp.MustCompile(`"[^"]*"|'[^']*'`)
 
 // ParseFrontmatter parses markdown content with strict YAML frontmatter.
 //
@@ -53,10 +57,13 @@ func ParseFrontmatter(data []byte) (*Scar, error) {
 				inFrontmatter = false
 				continue
 			}
-			// Security rule: Reject YAML aliases and anchor references (Billion Laughs protection)
+			// Security rule: Reject YAML aliases and anchor references (Billion Laughs protection).
+			// Quoted values are literal content, so a pattern that contains a pointer
+			// dereference is not an alias.
 			if strings.Contains(line, "*") || strings.Contains(line, "&") {
 				// Check if it's an alias/anchor token rather than comment or text
-				words := strings.Fields(line)
+				unquoted := quotedSegmentRegex.ReplaceAllString(line, "")
+				words := strings.Fields(unquoted)
 				for _, w := range words {
 					if strings.HasPrefix(w, "*") || strings.HasPrefix(w, "&") {
 						return nil, errors.New("strict YAML decoder rejected alias or anchor reference")

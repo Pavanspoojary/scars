@@ -201,6 +201,11 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"items":       map[string]string{"type": "string"},
 							"description": "Functions, methods, or type names involved in the task",
 						},
+						"commands": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Verification or build commands the task will run",
+						},
 						"error_signature": map[string]interface{}{
 							"type":        "string",
 							"description": "Stack trace, compiler error, or failing test output excerpt",
@@ -223,6 +228,15 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"items":       map[string]string{"type": "string"},
 							"description": "Target file paths being inspected or edited",
 						},
+						"symbols": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Target symbols or methods involved in the edit",
+						},
+						"task": map[string]interface{}{
+							"type":        "string",
+							"description": "High-level description of the task, used for term overlap ranking",
+						},
 						"budget_tokens": map[string]interface{}{
 							"type":        "integer",
 							"description": "Maximum estimated tokens to consume (default: 400)",
@@ -244,6 +258,11 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"type":        "string",
 							"description": "Raw compiler error, test failure log, or panic stack trace",
 						},
+						"files": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Optional repository files involved in the failure",
+						},
 					},
 					"required": []string{"error_output"},
 				},
@@ -262,10 +281,19 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"type":        "string",
 							"description": "Actionable prevention rule or architectural guidance",
 						},
+						"severity": map[string]interface{}{
+							"type":        "string",
+							"description": "Guardrail severity: 'critical', 'high', 'medium', or 'low'. Omitted scars default to high when enforced",
+						},
 						"files": map[string]interface{}{
 							"type":        "array",
 							"items":       map[string]string{"type": "string"},
 							"description": "Repository-relative file paths involved in the failure",
+						},
+						"symbols": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Functions, methods, or type names involved in the failure",
 						},
 						"verifier_argv": map[string]interface{}{
 							"type":        "array",
@@ -319,6 +347,15 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 							"type":        "array",
 							"items":       map[string]string{"type": "string"},
 							"description": "Target symbols or methods",
+						},
+						"commands": map[string]interface{}{
+							"type":        "array",
+							"items":       map[string]string{"type": "string"},
+							"description": "Verification or build commands the task will run",
+						},
+						"error_signature": map[string]interface{}{
+							"type":        "string",
+							"description": "Optional failing output already produced in a similar task, for signature matching",
 						},
 						"budget_tokens": map[string]interface{}{
 							"type":        "integer",
@@ -424,6 +461,7 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 			"title":     s.Title,
 			"lesson":    s.Lesson,
 			"state":     s.Lifecycle.State,
+			"severity":  s.Severity,
 			"review":    s.Review,
 			"verifier":  s.Verifier,
 			"freshness": freshness,
@@ -435,10 +473,10 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 		}
 
 	case "recall_scars":
-		opts := QueryOptions{
-			Threshold: 3,
-			TopK:      3,
-		}
+		// Unset limits defer to the repository configuration the same way the
+		// command line does, so a configured threshold or top_k governs MCP
+		// retrieval too.
+		opts := QueryOptions{}
 
 		if filesVal, ok := params.Arguments["files"].([]interface{}); ok {
 			for _, f := range filesVal {
@@ -451,6 +489,13 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 			for _, s := range symVal {
 				if str, ok := s.(string); ok && str != "" {
 					opts.Symbols = append(opts.Symbols, str)
+				}
+			}
+		}
+		if cmdVal, ok := params.Arguments["commands"].([]interface{}); ok {
+			for _, c := range cmdVal {
+				if str, ok := c.(string); ok && str != "" {
+					opts.Commands = append(opts.Commands, str)
 				}
 			}
 		}
@@ -483,6 +528,15 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 				}
 			}
 		}
+		var symbols []string
+		if symVal, ok := params.Arguments["symbols"].([]interface{}); ok {
+			for _, s := range symVal {
+				if str, ok := s.(string); ok && str != "" {
+					symbols = append(symbols, str)
+				}
+			}
+		}
+		task, _ := params.Arguments["task"].(string)
 		budget := 400
 		if bVal, ok := params.Arguments["budget_tokens"].(float64); ok && bVal > 0 {
 			budget = int(bVal)
@@ -494,6 +548,8 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 
 		snippet, err := store.InjectGuardrails(InjectOptions{
 			Files:        files,
+			Symbols:      symbols,
+			Task:         task,
 			BudgetTokens: budget,
 			Format:       format,
 		})
@@ -516,7 +572,16 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 			}
 		}
 
-		res, err := store.TriageError(errOut)
+		var files []string
+		if filesVal, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, f := range filesVal {
+				if str, ok := f.(string); ok && str != "" {
+					files = append(files, str)
+				}
+			}
+		}
+
+		res, err := store.TriageErrorWithFiles(errOut, files)
 		if err != nil {
 			return MCPToolResult{
 				IsError: true,
@@ -562,13 +627,42 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 			}
 		}
 
+		enriched := false
+
+		var symbols []string
+		if symVal, ok := params.Arguments["symbols"].([]interface{}); ok {
+			for _, s := range symVal {
+				if str, ok := s.(string); ok && str != "" {
+					symbols = append(symbols, str)
+				}
+			}
+		}
+		if len(symbols) > 0 {
+			draft.Anchors.Symbols = symbols
+			enriched = true
+		}
+
+		if severity, ok := params.Arguments["severity"].(string); ok && severity != "" {
+			draft.Severity = severity
+			enriched = true
+		}
+
 		if verifierVal, ok := params.Arguments["verifier_argv"].([]interface{}); ok {
 			for _, v := range verifierVal {
 				if str, ok := v.(string); ok && str != "" {
 					draft.Verifier.Argv = append(draft.Verifier.Argv, str)
+					enriched = true
 				}
 			}
-			_, _ = store.SaveScar(draft)
+		}
+
+		if enriched {
+			if _, err := store.SaveScar(draft); err != nil {
+				return MCPToolResult{
+					IsError: true,
+					Content: []MCPContent{{Type: "text", Text: fmt.Sprintf("Failed recording draft enrichment: %v", err)}},
+				}
+			}
 		}
 
 		res := map[string]string{
@@ -633,6 +727,15 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 				}
 			}
 		}
+		var commands []string
+		if rawCommands, ok := params.Arguments["commands"].([]interface{}); ok {
+			for _, rc := range rawCommands {
+				if cStr, ok := rc.(string); ok && strings.TrimSpace(cStr) != "" {
+					commands = append(commands, strings.TrimSpace(cStr))
+				}
+			}
+		}
+		errorSignature, _ := params.Arguments["error_signature"].(string)
 		budget := 400
 		if rawBudget, ok := params.Arguments["budget_tokens"].(float64); ok && rawBudget > 0 {
 			budget = int(rawBudget)
@@ -653,9 +756,14 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 		}
 
 		recalled, _ := store.Recall(QueryOptions{
-			Files:     files,
-			Symbols:   symbols,
-			Task:      task,
+			Files:          files,
+			Symbols:        symbols,
+			Commands:       commands,
+			ErrorSignature: errorSignature,
+			Task:           task,
+			// Planning is deliberately more sensitive than enforcement: the
+			// goal is to surface candidates for consideration before work
+			// begins, not to block.
 			Threshold: 2,
 			TopK:      10,
 		})

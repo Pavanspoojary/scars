@@ -20,7 +20,7 @@ func TestRecallAndScoring(t *testing.T) {
 	s1.Anchors.Commands = []string{"go test -race ./..."}
 	s1.Lifecycle.State = LifecycleActive
 	s1.Review.Status = ReviewApproved
-	s1.Verifier.Result = VerificationFailToPass
+	s1.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = store.RecordBaseline(s1, "hash-sync")
 	_, _ = store.SaveScar(s1)
 
@@ -149,7 +149,7 @@ func TestReadOnlyCheckExitCodes(t *testing.T) {
 	_ = store.RecordBaseline(draft, "hash-auth")
 	draft.Lifecycle.State = LifecycleActive
 	draft.Review.Status = ReviewApproved
-	draft.Verifier.Result = VerificationFailToPass
+	draft.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_, _ = store.SaveScar(draft)
 
 	cleanRes, _ := store.RunReadOnlyCheck("")

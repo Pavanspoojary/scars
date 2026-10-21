@@ -46,8 +46,8 @@ func TestTriageError(t *testing.T) {
 	s.Anchors.ErrorSignatures = []string{"all goroutines are asleep - deadlock"}
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
-	_ = store.RecordBaseline(s, "hash-worker")
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
+	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
 	_, _ = store.SaveScar(s)
 
 	trace := `fatal error: all goroutines are asleep - deadlock!

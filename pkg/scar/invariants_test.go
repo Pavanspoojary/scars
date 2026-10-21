@@ -70,7 +70,7 @@ func TestActiveStateInvariants(t *testing.T) {
 	}
 
 	// 6. Valid fail_to_pass passes
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "./...")
 	if err := s.ValidateInvariants(); err != nil {
 		t.Errorf("valid fail_to_pass should pass invariants: %v", err)
 	}
@@ -169,6 +169,49 @@ lifecycle:
 	}
 	if len(res.InvalidScars) != 1 {
 		t.Fatalf("expected 1 invalid scar reported, got %d (%v)", len(res.InvalidScars), res.InvalidScars)
+	}
+}
+
+func TestActiveScarVerifierCommandHashMustMatchArgv(t *testing.T) {
+	argv := []string{"go", "test", "-race", "./..."}
+	base := func() *Scar {
+		return &Scar{
+			SchemaVersion: CurrentSchemaVersion,
+			ID:            "hash-check",
+			Title:         "Hash check",
+			Lesson:        "Lesson",
+			Verifier: Verifier{
+				Argv:        argv,
+				Result:      VerificationFailToPass,
+				CommandHash: ComputeCommandHash(argv, "", nil),
+			},
+			Review:    Review{Status: ReviewApproved},
+			Lifecycle: Lifecycle{State: LifecycleActive},
+		}
+	}
+
+	if err := base().ValidateInvariants(); err != nil {
+		t.Fatalf("expected a matching command hash to satisfy invariants, got: %v", err)
+	}
+
+	missing := base()
+	missing.Verifier.CommandHash = ""
+	if err := missing.ValidateInvariants(); err == nil {
+		t.Error("expected an active fail_to_pass scar without a command hash to be rejected")
+	}
+
+	mismatched := base()
+	mismatched.Verifier.CommandHash = ComputeCommandHash([]string{"go", "test", "./..."}, "", nil)
+	if err := mismatched.ValidateInvariants(); err == nil {
+		t.Error("expected a command hash that does not match the argv to be rejected")
+	}
+
+	// A draft carries unverified evidence and is not subject to the rule.
+	draft := base()
+	draft.Lifecycle.State = LifecycleDraft
+	draft.Verifier.CommandHash = "fabricated"
+	if err := draft.ValidateInvariants(); err != nil {
+		t.Errorf("expected a draft to be unaffected by the command hash rule, got: %v", err)
 	}
 }
 

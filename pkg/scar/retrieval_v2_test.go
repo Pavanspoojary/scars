@@ -90,7 +90,7 @@ func TestRecallIndexCacheFastPath(t *testing.T) {
 		Anchors: Anchors{
 			Files: []string{"pkg/cache.go"},
 		},
-		Verifier: Verifier{Argv: []string{"go", "test", "./..."}, Result: VerificationFailToPass},
+		Verifier: failToPassVerifier("go", "test", "./..."),
 	}
 	if _, err := store.SaveScar(scar); err != nil {
 		t.Fatalf("failed saving scar: %v", err)

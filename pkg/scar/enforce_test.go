@@ -38,11 +38,8 @@ func TestEnforceBlocked(t *testing.T) {
 	s.FixHint = "Buffer worker channel to worker count"
 	s.BadPattern = "ch := make(chan Task)"
 	s.GoodPattern = "ch := make(chan Task, workers)"
-	s.Verifier = Verifier{
-		Argv:   []string{"go", "test", "-race", "./..."},
-		Result: VerificationFailToPass,
-	}
-	_ = store.RecordBaseline(s, "hash1")
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
+	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
 	_, _ = store.SaveScar(s)
 
 	// High severity matching file -> must block

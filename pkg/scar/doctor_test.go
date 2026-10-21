@@ -38,7 +38,7 @@ func TestStoreRunDoctorHealthy(t *testing.T) {
 	sc.Review.Reviewer = "maintainer"
 	sc.Review.Date = "2026-10-11"
 	sc.Review.Rationale = "Verified"
-	sc.Verifier.Result = VerificationFailToPass
+	sc.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	sc.Lifecycle.State = LifecycleActive
 
 	if err := store.RecordBaseline(sc, "test-cmd-hash"); err != nil {

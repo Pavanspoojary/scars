@@ -16,9 +16,8 @@ func TestSyncInstructionFile(t *testing.T) {
 	s, _, _ := store.CreateDraft("Deadlock Risk", "Buffer channel", []string{"pkg/worker.go"})
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
-	s.Verifier.Argv = []string{"go", "test", "-race"}
-	_ = store.RecordBaseline(s, "hash-test")
+	s.Verifier = failToPassVerifier("go", "test", "-race")
+	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
 	_, _ = store.SaveScar(s)
 
 	// 1. Test creation on non-existent file

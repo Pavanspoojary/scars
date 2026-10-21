@@ -113,7 +113,7 @@ func TestLintDetectsMissingSeverityOnActiveScar(t *testing.T) {
 		Title:         "No severity",
 		Lesson:        "Lesson",
 		Anchors:       Anchors{Files: []string{"pkg/worker.go"}},
-		Verifier:      Verifier{Result: VerificationFailToPass},
+		Verifier:      failToPassVerifier("go", "test", "./..."),
 		Review:        Review{Status: ReviewApproved},
 		Lifecycle:     Lifecycle{State: LifecycleActive},
 	}

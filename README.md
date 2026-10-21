@@ -237,6 +237,8 @@ git-scars check
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
+An active scar that claims `fail_to_pass` verification must record a `command_hash` derived from its own `argv`. A record whose hash does not match its command is rejected as an invariant violation and is never injected into an agent prompt.
+
 ### 10. Git Pre-Commit Hook Guardrail
 Install the Git pre-commit hook to catch stale active scars before staging and committing:
 ```bash

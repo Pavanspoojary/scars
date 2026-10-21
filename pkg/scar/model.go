@@ -248,6 +248,19 @@ func (s *Scar) ValidateInvariants() error {
 		// History is preserved; cannot be active
 	}
 
+	// Invariant: An active scar with fail_to_pass verification must carry a
+	// command hash derived from its own argv. Without this, the recorded
+	// evidence can be asserted independently of the command it describes.
+	if s.Lifecycle.State == LifecycleActive && s.Verifier.Result == VerificationFailToPass {
+		if strings.TrimSpace(s.Verifier.CommandHash) == "" {
+			return errors.New("invariant violation: active scar with fail_to_pass verification must record a verifier command hash")
+		}
+		expected := ComputeCommandHash(s.Verifier.Argv, s.Verifier.WorkingDir, s.Verifier.EnvAllowlist)
+		if s.Verifier.CommandHash != expected {
+			return fmt.Errorf("invariant violation: verifier command hash does not match the recorded argv (expected %s, got %s)", expected, s.Verifier.CommandHash)
+		}
+	}
+
 	return nil
 }
 

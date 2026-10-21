@@ -10,6 +10,120 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
+func TestLintReportsUnloadableScar(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-lint-test-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	malformed := filepath.Join(tmpDir, ".gitscars", "scars", "malformed.md")
+	doc := "---\nschema_version: \"1\"\nid: \"malformed\"\ntitle: \"Unterminated frontmatter\n"
+	if err := os.WriteFile(malformed, []byte(doc), 0644); err != nil {
+		t.Fatalf("failed writing malformed scar: %v", err)
+	}
+
+	if err := run([]string{"lint"}); err == nil {
+		t.Fatal("expected lint to fail on a scar file that cannot be loaded")
+	}
+}
+
+func TestAddWithDependencyAnchors(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-deps-test-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	err = run([]string{
+		"add",
+		"--title", "Redis client upgrade hazard",
+		"--lesson", "Upgrade the redis client only after reviewing the pipeline change",
+		"--files", "pkg/cache/redis.go",
+		"--deps", "github.com/redis/go-redis/v9@9.5.1",
+	})
+	if err != nil {
+		t.Fatalf("run add failed: %v", err)
+	}
+
+	store := scar.NewStore(tmpDir)
+	scars, err := store.ListScars()
+	if err != nil {
+		t.Fatalf("list scars failed: %v", err)
+	}
+	if len(scars) != 1 {
+		t.Fatalf("expected 1 scar, found %d", len(scars))
+	}
+	deps := scars[0].Scar.Anchors.Dependencies
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dependency anchor, got %d", len(deps))
+	}
+	if deps[0].Name != "github.com/redis/go-redis/v9" || deps[0].Version != "9.5.1" {
+		t.Errorf("unexpected dependency anchor: %+v", deps[0])
+	}
+}
+
+func TestVerifyExitCodeReflectsVerificationOutcome(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-verify-exit-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	writeScar := func(id string, argv []string) {
+		t.Helper()
+		doc := "---\nschema_version: \"1\"\nid: \"" + id + "\"\ntitle: \"Verify exit\"\nlesson: \"Lesson\"\nverifier:\n  result: \"not_attempted\"\n  argv:\n"
+		for _, a := range argv {
+			doc += "    - \"" + a + "\"\n"
+		}
+		doc += "lifecycle:\n  state: \"draft\"\n---\n"
+		path := filepath.Join(tmpDir, ".gitscars", "scars", id+".md")
+		if err := os.WriteFile(path, []byte(doc), 0644); err != nil {
+			t.Fatalf("failed writing scar %s: %v", id, err)
+		}
+	}
+
+	writeScar("failing", []string{"false"})
+	if err := run([]string{"verify", "failing", "--interactive"}); err == nil {
+		t.Fatal("expected verify to fail when the verifier command exits non-zero")
+	}
+
+	writeScar("passing", []string{"true"})
+	if err := run([]string{"verify", "passing", "--interactive"}); err != nil {
+		t.Fatalf("expected verify to succeed when the verifier command exits zero, got: %v", err)
+	}
+}
+
 func TestCLIWorkflow(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-cli-test-*")
 	if err != nil {

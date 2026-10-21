@@ -11,6 +11,11 @@ import (
 )
 
 // ParseFrontmatter parses markdown content with strict YAML frontmatter.
+//
+// Parsing is syntactic only. Lifecycle, review, and verification invariants are
+// enforced separately by ValidateInvariants so that records violating them remain
+// loadable and can be reported by 'git-scars check', 'lint', and 'doctor' instead
+// of being silently discarded during catalog reads.
 func ParseFrontmatter(data []byte) (*Scar, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	if !scanner.Scan() {
@@ -77,7 +82,7 @@ func ParseFrontmatter(data []byte) (*Scar, error) {
 		scar.Lesson = scar.Body
 	}
 
-	if err := scar.ValidateInvariants(); err != nil {
+	if err := scar.validateSchemaVersion(); err != nil {
 		return nil, err
 	}
 
@@ -87,6 +92,18 @@ func ParseFrontmatter(data []byte) (*Scar, error) {
 func parseYAMLMap(lines []string, s *Scar) error {
 	var currentSection string
 	var currentSubSection string
+	var pendingDep DependencyAnchor
+	var hasPendingDep bool
+
+	// flushDep commits a dependency entry that was completed by a later key.
+	flushDep := func() {
+		if !hasPendingDep {
+			return
+		}
+		s.Anchors.Dependencies = append(s.Anchors.Dependencies, pendingDep)
+		pendingDep = DependencyAnchor{}
+		hasPendingDep = false
+	}
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
@@ -132,8 +149,10 @@ func parseYAMLMap(lines []string, s *Scar) error {
 			case "fix_commit":
 				s.FixCommit = unquoteVal(val)
 			case "anchors", "verifier", "baseline", "review", "lifecycle":
+				flushDep()
 				currentSection = key
 			default:
+				flushDep()
 				currentSection = ""
 			}
 			continue
@@ -155,6 +174,20 @@ func parseYAMLMap(lines []string, s *Scar) error {
 						s.Anchors.Commands = append(s.Anchors.Commands, item)
 					case "error_signatures":
 						s.Anchors.ErrorSignatures = append(s.Anchors.ErrorSignatures, item)
+					case "dependencies":
+						flushDep()
+						hasPendingDep = true
+						key, value, ok := splitDependencyKey(item)
+						if !ok {
+							pendingDep.Name = item
+							break
+						}
+						switch key {
+						case "name":
+							pendingDep.Name = value
+						case "version":
+							pendingDep.Version = value
+						}
 					}
 				case "verifier":
 					if currentSubSection == "argv" {
@@ -182,6 +215,9 @@ func parseYAMLMap(lines []string, s *Scar) error {
 
 			// Sub-section headers (e.g. `files:` under `anchors:`)
 			if subVal == "" {
+				if currentSection != "anchors" || currentSubSection != "dependencies" {
+					flushDep()
+				}
 				currentSubSection = subKey
 				continue
 			}
@@ -189,8 +225,13 @@ func parseYAMLMap(lines []string, s *Scar) error {
 			// Sub-section scalar fields
 			switch currentSection {
 			case "anchors":
-				if subKey == "dependency" || strings.HasPrefix(subKey, "dep") {
-					// Handle dependency object
+				if currentSubSection == "dependencies" && hasPendingDep {
+					switch subKey {
+					case "name":
+						pendingDep.Name = unquoteVal(subVal)
+					case "version":
+						pendingDep.Version = unquoteVal(subVal)
+					}
 				}
 			case "verifier":
 				switch subKey {
@@ -248,7 +289,17 @@ func parseYAMLMap(lines []string, s *Scar) error {
 		}
 	}
 
+	flushDep()
 	return nil
+}
+
+// splitDependencyKey splits a dependency list entry into its key and unquoted value.
+func splitDependencyKey(item string) (key, value string, ok bool) {
+	idx := strings.Index(item, ":")
+	if idx < 0 {
+		return "", "", false
+	}
+	return strings.ToLower(strings.TrimSpace(item[:idx])), unquoteVal(item[idx+1:]), true
 }
 
 func unquoteVal(s string) string {
@@ -319,6 +370,15 @@ func FormatFrontmatter(s *Scar) ([]byte, error) {
 		buf.WriteString("  error_signatures:\n")
 		for _, errSig := range s.Anchors.ErrorSignatures {
 			buf.WriteString(fmt.Sprintf("    - %s\n", strconv.Quote(errSig)))
+		}
+	}
+	if len(s.Anchors.Dependencies) > 0 {
+		buf.WriteString("  dependencies:\n")
+		for _, dep := range s.Anchors.Dependencies {
+			buf.WriteString(fmt.Sprintf("    - name: %s\n", strconv.Quote(dep.Name)))
+			if dep.Version != "" {
+				buf.WriteString(fmt.Sprintf("      version: %s\n", strconv.Quote(dep.Version)))
+			}
 		}
 	}
 

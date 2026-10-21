@@ -16,8 +16,6 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.3.1"
-
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -92,7 +90,7 @@ func run(args []string) error {
 	case "triage":
 		return runTriage(store, args[1:])
 	case "version", "--version", "-v":
-		fmt.Printf("git-scars version %s\n", version)
+		fmt.Printf("git-scars version %s\n", scar.Version)
 		return nil
 	case "help", "-h", "--help":
 		printUsage()
@@ -140,7 +138,7 @@ Lifecycle Commands:
   feedback <id>   Record feedback on retrieval utility (--rating, --notes)
   version         Print git-scars version
   help            Show this help text
-`, version)
+`, scar.Version)
 }
 
 func findRepoRoot() string {
@@ -227,6 +225,7 @@ func runAdd(store *scar.Store, args []string) error {
 	title := fs.String("title", "", "Descriptive failure title")
 	lesson := fs.String("lesson", "", "Concise prevention lesson")
 	filesStr := fs.String("files", "", "Comma-separated list of anchored files")
+	depsStr := fs.String("deps", "", "Comma-separated dependency anchors in name@version form")
 	interactive := fs.Bool("interactive", false, "Interactive prompt mode")
 	fs.BoolVar(interactive, "i", false, "Interactive prompt mode (shorthand)")
 
@@ -269,9 +268,31 @@ func runAdd(store *scar.Store, args []string) error {
 		}
 	}
 
+	var deps []scar.DependencyAnchor
+	if *depsStr != "" {
+		for _, d := range strings.Split(*depsStr, ",") {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			name, version, _ := strings.Cut(d, "@")
+			deps = append(deps, scar.DependencyAnchor{
+				Name:    strings.TrimSpace(name),
+				Version: strings.TrimSpace(version),
+			})
+		}
+	}
+
 	draft, path, err := store.CreateDraft(*title, *lesson, files)
 	if err != nil {
 		return fmt.Errorf("failed creating draft: %w", err)
+	}
+
+	if len(deps) > 0 {
+		draft.Anchors.Dependencies = deps
+		if _, err := store.SaveScar(draft); err != nil {
+			return fmt.Errorf("failed saving dependency anchors: %w", err)
+		}
 	}
 
 	fmt.Printf("Created draft scar: %s\nPath: %s\nStatus: %s (review: %s, verifier: %s)\n",
@@ -297,9 +318,9 @@ func runVerify(store *scar.Store, args []string) error {
 	}
 
 	ctx := context.Background()
-	outcome, err := store.VerifyFailToPass(ctx, s, nil, *interactive)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "verification notice: %v\n", err)
+	outcome, verifyErr := store.VerifyFailToPass(ctx, s, nil, *interactive)
+	if verifyErr != nil {
+		fmt.Fprintf(os.Stderr, "verification notice: %v\n", verifyErr)
 	}
 
 	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
@@ -313,6 +334,12 @@ func runVerify(store *scar.Store, args []string) error {
 		fmt.Printf("Output excerpt:\n%s\n", s.Verifier.OutputExcerpt)
 	}
 	fmt.Printf("\nNote: Verification recorded. A human reviewer must run 'git-scars promote %s' to approve and activate.\n", s.ID)
+
+	// A verification that did not produce a passable result must be visible to
+	// callers and CI, not reported as a successful command.
+	if verifyErr != nil {
+		return fmt.Errorf("verification did not pass: %w", verifyErr)
+	}
 	return nil
 }
 
@@ -703,13 +730,22 @@ func runCheck(store *scar.Store, args []string) error {
 }
 
 func runLint(store *scar.Store, args []string) error {
-	scars, err := store.ListScars()
+	scars, failures, err := store.ListScarsDetailed()
 	if err != nil {
 		return fmt.Errorf("failed reading scars: %w", err)
 	}
 
 	var allScars []*scar.Scar
 	var allFindings []scar.LintFinding
+
+	for _, f := range failures {
+		allFindings = append(allFindings, scar.LintFinding{
+			ScarID:   f.ID,
+			Severity: "ERROR",
+			Rule:     "unloadable_scar",
+			Message:  fmt.Sprintf("scar file could not be loaded: %s", f.Error),
+		})
+	}
 
 	for _, summary := range scars {
 		s := summary.Scar
@@ -735,13 +771,14 @@ func runLint(store *scar.Store, args []string) error {
 		}
 	}
 
+	audited := len(scars) + len(failures)
 	if len(allFindings) == 0 {
-		fmt.Printf("Lint clean: %d scars audited with zero findings.\n", len(allScars))
+		fmt.Printf("Lint clean: %d scar file(s) audited with zero findings.\n", audited)
 		return nil
 	}
 
 	hasError := false
-	fmt.Printf("Lint findings for %d scars:\n", len(allScars))
+	fmt.Printf("Lint findings across %d scar file(s):\n", audited)
 	for _, f := range allFindings {
 		if f.Severity == "ERROR" {
 			hasError = true

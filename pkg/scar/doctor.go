@@ -92,14 +92,19 @@ func (s *Store) RunDoctor() *DoctorReport {
 	}
 
 	// 3. Scars, Lint & Invariant Checks
-	summaries, err := s.ListScars()
+	summaries, failures, err := s.ListScarsDetailed()
 	if err != nil {
 		addCheck("Scar Catalog", "FAIL", fmt.Sprintf("Failed reading scars: %v", err))
 	} else {
 		var lintErrors []string
 		var invariantErrors []string
 		var staleScars []string
+		var loadErrors []string
 		activeCount := 0
+
+		for _, f := range failures {
+			loadErrors = append(loadErrors, fmt.Sprintf("%s: %s", f.ID, f.Error))
+		}
 
 		for _, sum := range summaries {
 			sc := sum.Scar
@@ -124,6 +129,13 @@ func (s *Store) RunDoctor() *DoctorReport {
 			if sc.Lifecycle.State == LifecycleActive && sum.Freshness == FreshnessChanged {
 				staleScars = append(staleScars, sc.ID)
 			}
+		}
+
+		// Scar loadability evaluation
+		if len(loadErrors) > 0 {
+			addCheck("Scar Loadability", "FAIL", fmt.Sprintf("%d scar file(s) failed to load", len(loadErrors)), loadErrors...)
+		} else {
+			addCheck("Scar Loadability", "OK", fmt.Sprintf("%d scar file(s) loaded successfully", len(summaries)))
 		}
 
 		// Schema / Lint evaluation

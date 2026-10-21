@@ -159,6 +159,8 @@ git-scars verify nil-pointer-dereference-8a1b3f --interactive
 ```
 Computes deterministic command hashes, scrubs the environment, redacts secrets, and tests the worktree.
 
+The command exits `1` when verification does not produce a passable result, so CI pipelines can gate on it. Recorded evidence never promotes a scar on its own: a human reviewer must still run `git-scars promote`.
+
 ### 4. Review and Promote
 Human review is required before a Scar can become active:
 ```bash
@@ -231,7 +233,7 @@ git-scars check
 ```
 **Stable Exit Codes**:
 - `0`: All Scars valid and current.
-- `1`: Invalid format or invariant violation.
+- `1`: Invalid format or invariant violation. Records that fail to parse or that break a lifecycle invariant are reported, never skipped.
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
@@ -271,7 +273,7 @@ git-scars stats --json
 ```
 
 ### 13. Run Full Diagnostics & Automated Repair
-Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
+Audit Git worktree health, scar file loadability, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
 git-scars doctor
@@ -429,6 +431,8 @@ Replaced raw map with sync.Map or guarded reads and writes with sync.RWMutex.
 
 GitScars provides a built-in stdio Model Context Protocol (MCP) server for native integration with coding assistants:
 
+The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata.
+
 ```bash
 git-scars mcp
 ```
@@ -550,6 +554,25 @@ GitScars automatically inspects repository dependency manifests and lockfiles to
 
 When dependencies are upgraded or downgraded, Scars anchored to vulnerable or breaking versions automatically trigger match signals during recall.
 
+Dependency anchors are authored with the `name@version` form:
+
+```bash
+git-scars add \
+  --title "Redis pipeline breaks on client upgrade" \
+  --lesson "Upgrade the redis client only after reviewing the pipeline change" \
+  --files "pkg/cache/redis.go" \
+  --deps "github.com/redis/go-redis/v9@9.5.1"
+```
+
+They are persisted in the scar frontmatter and re-read on every subsequent load, so the anchor survives verification, reaffirmation, and synchronization cycles:
+
+```yaml
+anchors:
+  dependencies:
+    - name: "github.com/redis/go-redis/v9"
+      version: "9.5.1"
+```
+
 ---
 
 ## CLI Command Reference
@@ -557,13 +580,13 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
 | `init` | `[--agent <targets>, --ci <target>]` | Initialize `.gitscars/` repository, agent configs, and CI workflows (`--ci github`) |
-| `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
+| `add` | `[-i], [--title, --lesson, --files, --deps]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
 | `show` | `<id>` | Display full metadata, anchors, and body of a scar |
 | `diff` | `<id>` | Inspect unified line diff of anchor files against baseline |
 | `promote` | `<id> --status active` | Promote a scar to active state (enforces review & verifier invariants) |
-| `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence |
+| `verify` | `<id> [--interactive]` | Safely execute verifier in scrubbed env and record evidence (exit `1` when verification does not pass) |
 | `reaffirm` | `<id> --reviewer --rationale` | Reaffirm a scar after anchor code drift |
 | `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
 | `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
@@ -578,7 +601,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
 | `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
-| `lint` | none | Security and schema audit (checks traversal, injections, noisy scars) |
+| `lint` | none | Security and schema audit (checks traversal, injections, unloadable files, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |

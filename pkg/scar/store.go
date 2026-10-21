@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Store manages loading, creating, and updating Scar records on disk.
@@ -163,14 +164,32 @@ type ScarSummary struct {
 	Freshness string
 }
 
+// ParseFailure records a scar file that could not be loaded from disk.
+type ParseFailure struct {
+	FilePath string
+	ID       string
+	Error    string
+}
+
+// ListScars returns the catalog of loadable scars. Files that fail to load are
+// omitted; use ListScarsDetailed to surface them.
 func (s *Store) ListScars() ([]ScarSummary, error) {
+	scars, _, err := s.ListScarsDetailed()
+	return scars, err
+}
+
+// ListScarsDetailed returns the catalog of loadable scars together with the
+// files that failed to load. Load failures are reported rather than discarded so
+// that 'git-scars check', 'lint', and 'doctor' can surface malformed records
+// instead of silently passing them.
+func (s *Store) ListScarsDetailed() ([]ScarSummary, []ParseFailure, error) {
 	if _, err := os.Stat(s.ScarsDir); os.IsNotExist(err) {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	entries, err := os.ReadDir(s.ScarsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed reading scars directory: %w", err)
+		return nil, nil, fmt.Errorf("failed reading scars directory: %w", err)
 	}
 
 	var mdFiles []string
@@ -181,7 +200,7 @@ func (s *Store) ListScars() ([]ScarSummary, error) {
 	}
 
 	if len(mdFiles) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	workers := 8
@@ -196,9 +215,10 @@ func (s *Store) ListScars() ([]ScarSummary, error) {
 	close(jobs)
 
 	var (
-		mu      sync.Mutex
-		results []ScarSummary
-		wg      sync.WaitGroup
+		mu       sync.Mutex
+		results  []ScarSummary
+		failures []ParseFailure
+		wg       sync.WaitGroup
 	)
 
 	for w := 0; w < workers; w++ {
@@ -208,10 +228,24 @@ func (s *Store) ListScars() ([]ScarSummary, error) {
 			for path := range jobs {
 				data, err := os.ReadFile(path)
 				if err != nil {
+					mu.Lock()
+					failures = append(failures, ParseFailure{
+						FilePath: path,
+						ID:       strings.TrimSuffix(filepath.Base(path), ".md"),
+						Error:    err.Error(),
+					})
+					mu.Unlock()
 					continue
 				}
 				scar, err := ParseFrontmatter(data)
 				if err != nil {
+					mu.Lock()
+					failures = append(failures, ParseFailure{
+						FilePath: path,
+						ID:       strings.TrimSuffix(filepath.Base(path), ".md"),
+						Error:    err.Error(),
+					})
+					mu.Unlock()
 					continue
 				}
 				freshness := s.ComputeFreshness(scar)
@@ -233,8 +267,11 @@ func (s *Store) ListScars() ([]ScarSummary, error) {
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Scar.ID < results[j].Scar.ID
 	})
+	sort.Slice(failures, func(i, j int) bool {
+		return failures[i].FilePath < failures[j].FilePath
+	})
 
-	return results, nil
+	return results, failures, nil
 }
 
 // ComputeFreshness dynamically compares current file hashes to recorded baseline hashes.
@@ -366,6 +403,8 @@ func (s *Store) RecordBaseline(scar *Scar, commandHash string) error {
 	if scar.Baseline.AnchorHashes == nil {
 		scar.Baseline.AnchorHashes = make(map[string]string)
 	}
+
+	scar.Baseline.RecordedAt = time.Now().UTC().Format(time.RFC3339)
 
 	for _, f := range scar.Anchors.Files {
 		fullPath := filepath.Join(s.RepoRoot, f)

@@ -232,3 +232,45 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - 100% intellectual honesty and alignment with repository standards.
   - Clear separation between static scenario modeling, executable mechanical tests, and future empirical agent trials.
   - Preserves the credibility of genuine architectural breakthroughs (AST symbol drift detection, scrubbed fail-to-pass verifiers, and token-budgeted prompt injection).
+
+---
+
+## ADR-0015: Separation of Parsing from Invariant Validation and Surfacing of Load Failures
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - `ParseFrontmatter` called `ValidateInvariants` before returning a parsed record. Any record violating a lifecycle, review, or verification invariant therefore failed to parse.
+  - `ListScars` discarded every file that failed to parse. The combined effect was that invariant-violating records were removed from the catalog before any consumer could inspect them.
+  - `RunReadOnlyCheck`, `runLint`, and the `RunDoctor` "Lifecycle Invariants" probe all re-validate invariants on already-parsed records. Because invalid records never reached them, these probes were unreachable in practice: `git-scars check` reported exit code `0` and zero findings against a repository containing a record that claimed `lifecycle.state: active` without human approval or verification evidence.
+  - A malformed record was equally invisible: it was skipped without any diagnostic.
+  - The repository's central thesis is that unverified claims are toxic. A guardrail that cannot observe an unverified claim does not enforce the thesis.
+- **Decision**:
+  - Split schema compatibility out of `ValidateInvariants` into `validateSchemaVersion`. Schema compatibility remains a parse-time gate so that a build refuses to read a record format it does not understand.
+  - `ParseFrontmatter` is now syntactic only. Lifecycle, review, and verification invariants are enforced by `ValidateInvariants`, which the reporting commands apply to loaded records.
+  - Add `ListScarsDetailed`, returning load failures alongside the loadable catalog. `ListScars` delegates to it and preserves its existing contract.
+  - `RunReadOnlyCheck` reports load failures as invalid scars and exits `1`. `runLint` emits an `unloadable_scar` error finding. `RunDoctor` gains a "Scar Loadability" probe that fails the report.
+- **Consequences**:
+  - Invariant violations and malformed records are now observable in CI, which restores the enforcement guarantee the project is built on.
+  - `ParseFrontmatter` no longer guarantees semantic validity. Callers that persist a parsed record remain protected because `SaveScar` validates invariants before writing.
+  - The catalog reads remain a single pass: load failures are collected during the existing worker pool rather than through a second scan.
+  - Exit code `1` from `git-scars check` now covers the full set of invalid records it documents.
+
+---
+
+## ADR-0016: Authorable and Round-Trippable Dependency Anchors
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - `Anchors.Dependencies` was consumed by retrieval scoring and matched against parsed lockfiles, but it was never written. The parser had an empty stub branch for dependency entries, `FormatFrontmatter` omitted the section, and no command could author an anchor.
+  - The dependency matching, lockfile parsing, and version scoring path was therefore unreachable in practice, and the capability described in the README and in ADR-0005 and ADR-0006 could not be exercised.
+  - Hand-written dependency anchors were not merely ignored. Because the serializer omitted the section, the next write to the record discarded the anchor entirely.
+- **Decision**:
+  - Parse dependency entries from the frontmatter and serialize them back, so anchors survive verification, reaffirmation, promotion, and synchronization cycles.
+  - Author dependency anchors through `git-scars add --deps` using the `name@version` form.
+- **Consequences**:
+  - Dependency anchors become a functional retrieval signal: a matching installed version scores `+3`, which is sufficient on its own to cross the abstain threshold.
+  - A dependency upgrade now surfaces the scars anchored to the previous version, as the README describes.
+  - The parser remains a hand-written state machine with no third-party dependency, consistent with the zero-dependency constraint.
+

@@ -121,6 +121,57 @@ verifier:
 	}
 }
 
+func TestParseFrontmatterSeparatesParsingFromValidation(t *testing.T) {
+	doc := []byte(`---
+schema_version: "1"
+id: "invariant-violation"
+title: "Unverified active scar"
+lesson: "Claimed active without human approval or verification"
+lifecycle:
+  state: "active"
+---
+`)
+	scar, err := ParseFrontmatter(doc)
+	if err != nil {
+		t.Fatalf("expected parse to succeed so the violation remains reportable, got: %v", err)
+	}
+	if err := scar.ValidateInvariants(); err == nil {
+		t.Fatal("expected invariant validation to reject an active scar without approval")
+	}
+}
+
+func TestCheckReportsInvariantViolations(t *testing.T) {
+	dir := t.TempDir()
+	scarsDir := filepath.Join(dir, DefaultStoreDir, ScarsDirName)
+	if err := os.MkdirAll(scarsDir, 0755); err != nil {
+		t.Fatalf("failed creating scars dir: %v", err)
+	}
+	doc := `---
+schema_version: "1"
+id: "invariant-violation"
+title: "Unverified active scar"
+lesson: "Claimed active without human approval or verification"
+lifecycle:
+  state: "active"
+---
+`
+	if err := os.WriteFile(filepath.Join(scarsDir, "invariant-violation.md"), []byte(doc), 0644); err != nil {
+		t.Fatalf("failed writing scar: %v", err)
+	}
+
+	store := NewStore(dir)
+	res, err := store.RunReadOnlyCheck("")
+	if err != nil {
+		t.Fatalf("read-only check failed: %v", err)
+	}
+	if res.ExitCode != 1 {
+		t.Fatalf("expected exit code 1 for an invariant violation, got %d", res.ExitCode)
+	}
+	if len(res.InvalidScars) != 1 {
+		t.Fatalf("expected 1 invalid scar reported, got %d (%v)", len(res.InvalidScars), res.InvalidScars)
+	}
+}
+
 func TestStoreOperationsWithoutGit(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-store-test-*")
 	if err != nil {
@@ -157,13 +208,16 @@ func TestStoreOperationsWithoutGit(t *testing.T) {
 		t.Errorf("expected unbaselined scar freshness to be unavailable, got %s", scars[0].Freshness)
 	}
 
-	// Create dummy anchor file and record baseline
+	// Record baseline
 	anchorPath := filepath.Join(tmpDir, "worker.go")
 	if err := os.WriteFile(anchorPath, []byte("package main\n"), 0644); err != nil {
 		t.Fatalf("failed writing anchor file: %v", err)
 	}
 	if err := store.RecordBaseline(draft, "cmd-hash-123"); err != nil {
 		t.Fatalf("failed recording baseline: %v", err)
+	}
+	if draft.Baseline.RecordedAt == "" {
+		t.Error("expected baseline to record the time it was captured")
 	}
 	if _, err := store.SaveScar(draft); err != nil {
 		t.Fatalf("failed saving scar: %v", err)

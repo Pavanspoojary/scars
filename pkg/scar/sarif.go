@@ -316,7 +316,14 @@ jobs:
             git diff --name-only HEAD~1...HEAD > /tmp/changed.txt
           fi
           if [ -s /tmp/changed.txt ]; then
-            git-scars enforce --files "$(cat /tmp/changed.txt)" --fail-on high --format sarif > git-scars-enforce.sarif || true
+            set +e
+            git-scars enforce --files "$(cat /tmp/changed.txt)" --fail-on high --format sarif > git-scars-enforce.sarif
+            STATUS=$?
+            set -e
+            if [ "$STATUS" -ne 0 ]; then
+              echo "::error::This change touches code covered by an active guardrail. Review the annotations on this pull request, then reaffirm or supersede the guardrail to record the review."
+              exit "$STATUS"
+            fi
           fi
 
       - name: Upload SARIF report

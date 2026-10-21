@@ -48,8 +48,10 @@ type MCPToolResult struct {
 	IsError bool         `json:"isError,omitempty"`
 }
 
-// ServeMCP runs a read-only Model Context Protocol (MCP) server over stdin/stdout.
-// Invariant: This server is strictly read-only and never mutates repository files or runs verifiers.
+// ServeMCP runs a Model Context Protocol (MCP) server over stdin/stdout.
+// Invariant: This server never executes verifiers and never modifies an
+// existing scar. The draft_scar tool writes a new draft record, which is a
+// creation rather than a mutation of recorded failure memory.
 func (s *Store) ServeMCP(in io.Reader, out io.Writer) error {
 	scanner := bufio.NewScanner(in)
 	// Allow large buffers for multi-line JSON
@@ -670,7 +672,15 @@ func executeMCPTool(store *Store, params MCPToolCallParams) MCPToolResult {
 
 	case "post_failure_learn":
 		errorOutput, _ := params.Arguments["error_output"].(string)
-		triageRes, err := store.TriageError(errorOutput)
+		var files []string
+		if rawFiles, ok := params.Arguments["files"].([]interface{}); ok {
+			for _, rf := range rawFiles {
+				if fStr, ok := rf.(string); ok && strings.TrimSpace(fStr) != "" {
+					files = append(files, strings.TrimSpace(fStr))
+				}
+			}
+		}
+		triageRes, err := store.TriageErrorWithFiles(errorOutput, files)
 		if err != nil {
 			return MCPToolResult{
 				IsError: true,

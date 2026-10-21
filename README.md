@@ -475,7 +475,7 @@ Injection, triage, and enforcement deliberately use a more sensitive threshold t
 
 GitScars provides a built-in stdio Model Context Protocol (MCP) server for native integration with coding assistants:
 
-The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata.
+The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata. It never executes verifiers and never modifies an existing scar. The `draft_scar` tool writes a new draft record, which is a creation rather than a change to recorded failure memory.
 
 ```bash
 git-scars mcp
@@ -652,7 +652,7 @@ anchors:
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |
-| `mcp` | none | Run read-only stdio Model Context Protocol (MCP) server |
+| `mcp` | none | Run stdio Model Context Protocol (MCP) server |
 | `feedback` | `<id> --rating --notes` | Record retrieval utility feedback (`helpful`, `irrelevant`, `incorrect`) |
 | `version` | none | Print `git-scars` version |
 

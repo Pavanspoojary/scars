@@ -20,7 +20,7 @@ func TestFindDuplicates(t *testing.T) {
 	s1, _, _ := store.CreateDraft("Concurrent Map Write in Exporter", "Always guard metrics map with sync.RWMutex", []string{"pkg/exporter.go"})
 	s1.Lifecycle.State = LifecycleActive
 	s1.Review.Status = ReviewApproved
-	s1.Verifier.Result = VerificationFailToPass
+	s1.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg"), 0755)
 	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/exporter.go"), []byte("package exporter\n"), 0644)
 	_ = store.RecordBaseline(s1, "hash1")
@@ -29,7 +29,7 @@ func TestFindDuplicates(t *testing.T) {
 	s2, _, _ := store.CreateDraft("Concurrent Map Write in Telemetry Exporter", "Always guard telemetry metrics map with sync.RWMutex", []string{"pkg/exporter.go"})
 	s2.Lifecycle.State = LifecycleActive
 	s2.Review.Status = ReviewApproved
-	s2.Verifier.Result = VerificationFailToPass
+	s2.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = store.RecordBaseline(s2, "hash2")
 	_, _ = store.SaveScar(s2)
 
@@ -37,7 +37,7 @@ func TestFindDuplicates(t *testing.T) {
 	s3, _, _ := store.CreateDraft("Buffer Channel Deadlock in Dispatcher", "Worker channels must be buffered to worker count", []string{"pkg/disp.go"})
 	s3.Lifecycle.State = LifecycleActive
 	s3.Review.Status = ReviewApproved
-	s3.Verifier.Result = VerificationFailToPass
+	s3.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/disp.go"), []byte("package disp\n"), 0644)
 	_ = store.RecordBaseline(s3, "hash3")
 	_, _ = store.SaveScar(s3)

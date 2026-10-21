@@ -37,6 +37,25 @@ func severityInt(sev string) int {
 	}
 }
 
+// enforceSeverityLevel maps a severity to a blocking level. A guardrail that
+// does not declare a severity is treated as high, so an uncalibrated guardrail
+// is never silently downgraded below a blocking threshold.
+func enforceSeverityLevel(sev string) int {
+	if strings.TrimSpace(sev) == "" {
+		return severityInt(SeverityHigh)
+	}
+	return severityInt(sev)
+}
+
+// effectiveSeverity returns the severity used for blocking decisions, defaulting
+// an undeclared severity to high.
+func effectiveSeverity(sev string) string {
+	if strings.TrimSpace(sev) == "" {
+		return SeverityHigh
+	}
+	return sev
+}
+
 // Enforce evaluates target files and symbols against active scars.
 // Returns Blocked = true if any matching scar has score >= 7 OR
 // has severity >= FailOn with score >= 3.
@@ -72,11 +91,8 @@ func (s *Store) Enforce(opts EnforceOptions) (*EnforceResult, error) {
 
 	maxLevel := 0
 	for _, sc := range candidates {
-		sev := sc.Scar.Severity
-		if sev == "" {
-			sev = SeverityMedium
-		}
-		level := severityInt(sev)
+		sev := effectiveSeverity(sc.Scar.Severity)
+		level := enforceSeverityLevel(sev)
 		if level > maxLevel {
 			maxLevel = level
 			res.HighestSeverity = sev

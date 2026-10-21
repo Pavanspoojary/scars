@@ -35,8 +35,8 @@ func TestRepoStats(t *testing.T) {
 	scar.Anchors.ErrorSignatures = []string{"context deadline exceeded"}
 	scar.Lifecycle.State = LifecycleActive
 	scar.Review.Status = ReviewApproved
-	scar.Verifier.Result = VerificationFailToPass
-	_ = store.RecordBaseline(scar, "cmd-hash")
+	scar.Verifier = failToPassVerifier("go", "test", "-race", "./...")
+	_ = store.RecordBaseline(scar, scar.Verifier.CommandHash)
 	_, _ = store.SaveScar(scar)
 
 	// Record feedback

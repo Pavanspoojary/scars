@@ -16,7 +16,7 @@ func TestBundleExportAndImportRoundtrip(t *testing.T) {
 	s1, _, _ := srcStore.CreateDraft("Goroutine Leak", "Always close done channel", []string{"pkg/worker.go"})
 	s1.Lifecycle.State = LifecycleActive
 	s1.Review.Status = ReviewApproved
-	s1.Verifier.Result = VerificationFailToPass
+	s1.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	s1.Severity = SeverityHigh
 	_ = os.MkdirAll(filepath.Join(srcDir, "pkg"), 0755)
 	_ = os.WriteFile(filepath.Join(srcDir, "pkg/worker.go"), []byte("package worker\n"), 0644)

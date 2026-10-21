@@ -126,7 +126,7 @@ func TestDependencyAnchorScoringInRecall(t *testing.T) {
 	}
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 
 	_ = os.WriteFile(filepath.Join(tmpDir, "package.json"), []byte("{}\n"), 0644)
 	_ = store.RecordBaseline(s, "hash-pkg")

@@ -20,7 +20,7 @@ func TestMCPServerHandshakeAndTools(t *testing.T) {
 	s, _, _ := store.CreateDraft("DNS Resolution Hang", "Check resolver timeout", []string{"pkg/net.go"})
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg"), 0755)
 	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/net.go"), []byte("package net\n"), 0644)
 	_ = store.RecordBaseline(s, "hash-net")
@@ -88,7 +88,7 @@ func TestMCPServerCompositeTools(t *testing.T) {
 	s, _, _ := store.CreateDraft("Worker Deadlock", "Buffer worker channel", []string{"pkg/worker.go"})
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	s.Severity = "high"
 	s.FixHint = "Buffer task channel"
 	s.BadPattern = "make(chan int)"

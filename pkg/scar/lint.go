@@ -113,7 +113,115 @@ func LintScar(repoRoot string, s *Scar) []LintFinding {
 		})
 	}
 
+	// 5. Anchor semantics: the guardrail must still point at code that exists
+	// and that no longer contains the footgun it describes.
+	findings = append(findings, lintAnchorSemantics(repoRoot, s)...)
+
 	return findings
+}
+
+// lintAnchorSemantics verifies that the anchors of a scar still describe the
+// code they claim to describe. A guardrail whose anchors have drifted no longer
+// matches on retrieval signals and silently stops protecting anything.
+//
+// Patterns are expected to be literal snippets extracted from the anchored
+// files so that presence and absence can be checked deterministically.
+func lintAnchorSemantics(repoRoot string, s *Scar) []LintFinding {
+	var findings []LintFinding
+
+	// Anchored symbols must resolve in at least one anchored file. Files whose
+	// language is not supported for symbol extraction cannot be verified.
+	if symbolVerifiable(s.Anchors.Files) {
+		for _, sym := range s.Anchors.Symbols {
+			if strings.TrimSpace(sym) == "" {
+				continue
+			}
+			if !symbolResolves(repoRoot, s.Anchors.Files, sym) {
+				findings = append(findings, LintFinding{
+					ScarID:   s.ID,
+					Severity: "WARNING",
+					Rule:     "anchor_symbol_missing",
+					Message:  fmt.Sprintf("anchored symbol %q was not found in any anchored file", sym),
+				})
+			}
+		}
+	}
+
+	// A bad pattern that is still present means the known footgun was never
+	// removed, or was reintroduced after the guardrail was written.
+	if s.BadPattern != "" {
+		if file, found := findPatternInAnchors(repoRoot, s.Anchors.Files, s.BadPattern); found {
+			findings = append(findings, LintFinding{
+				ScarID:   s.ID,
+				Severity: "ERROR",
+				Rule:     "bad_pattern_present",
+				Message:  fmt.Sprintf("the recorded bad pattern is still present in anchored file %s", file),
+			})
+		}
+	}
+
+	// A good pattern that cannot be found suggests the anchor no longer covers
+	// the code that carries the fix.
+	if s.GoodPattern != "" {
+		if _, found := findPatternInAnchors(repoRoot, s.Anchors.Files, s.GoodPattern); !found {
+			findings = append(findings, LintFinding{
+				ScarID:   s.ID,
+				Severity: "WARNING",
+				Rule:     "good_pattern_absent",
+				Message:  "the recorded good pattern was not found in any anchored file; the anchor may no longer cover the fixed code",
+			})
+		}
+	}
+
+	// An active guardrail must declare how serious it is, otherwise it cannot
+	// be compared against a blocking threshold.
+	if s.Lifecycle.State == LifecycleActive && strings.TrimSpace(s.Severity) == "" {
+		findings = append(findings, LintFinding{
+			ScarID:   s.ID,
+			Severity: "WARNING",
+			Rule:     "missing_severity",
+			Message:  "active scar does not declare a severity, so it cannot be compared against a blocking threshold",
+		})
+	}
+
+	return findings
+}
+
+// symbolVerifiable reports whether any anchored file supports symbol extraction.
+func symbolVerifiable(anchorFiles []string) bool {
+	for _, f := range anchorFiles {
+		if IsSupportedSymbolFile(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// symbolResolves reports whether a symbol is declared in any of the anchored files.
+func symbolResolves(repoRoot string, anchorFiles []string, symbol string) bool {
+	for _, rel := range anchorFiles {
+		if !IsSupportedSymbolFile(rel) {
+			continue
+		}
+		if _, err := ExtractSymbolHash(filepath.Join(repoRoot, rel), symbol); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// findPatternInAnchors returns the first anchored file that contains the pattern.
+func findPatternInAnchors(repoRoot string, anchorFiles []string, pattern string) (string, bool) {
+	for _, rel := range anchorFiles {
+		data, err := os.ReadFile(filepath.Join(repoRoot, rel))
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), pattern) {
+			return rel, true
+		}
+	}
+	return "", false
 }
 
 // LintCollection audits cross-scar properties like duplicates and contradictions.

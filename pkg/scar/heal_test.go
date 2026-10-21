@@ -17,7 +17,7 @@ func TestRunHealCommand(t *testing.T) {
 	s, _, _ := store.CreateDraft("Worker Deadlock", "Buffer worker channels", []string{"pkg/worker.go"})
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	s.Severity = SeverityHigh
 	s.FixHint = "Buffer task channel"
 	s.BadPattern = "make(chan Task)"

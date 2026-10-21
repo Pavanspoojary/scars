@@ -375,6 +375,11 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 				if err != nil {
 					continue
 				}
+				// Fail closed: a scar that violates an invariant must never be
+				// injected into an agent prompt.
+				if fullScar.ValidateInvariants() != nil {
+					continue
+				}
 				freshness := s.ComputeFreshness(fullScar)
 				if freshness != FreshnessCurrent && !q.IncludeStale {
 					continue
@@ -399,6 +404,12 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 
 			// Only active scars are retrieved in normal recall
 			if scar.Lifecycle.State != LifecycleActive {
+				continue
+			}
+
+			// Fail closed: a scar that violates an invariant must never be
+			// injected into an agent prompt.
+			if scar.ValidateInvariants() != nil {
 				continue
 			}
 

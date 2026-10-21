@@ -19,7 +19,7 @@ func TestFeedbackQualityAndRecallPenalty(t *testing.T) {
 	s, _, _ := store.CreateDraft("Test Scar", "Lesson", []string{"pkg/test.go"})
 	s.Lifecycle.State = LifecycleActive
 	s.Review.Status = ReviewApproved
-	s.Verifier.Result = VerificationFailToPass
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
 	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg"), 0755)
 	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/test.go"), []byte("package test\n"), 0644)
 	_ = store.RecordBaseline(s, "hash-test")

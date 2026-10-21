@@ -237,6 +237,8 @@ git-scars check
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 
+An active scar that claims `fail_to_pass` verification must record a `command_hash` derived from its own `argv`. A record whose hash does not match its command is rejected as an invariant violation and is never injected into an agent prompt.
+
 ### 10. Git Pre-Commit Hook Guardrail
 Install the Git pre-commit hook to catch stale active scars before staging and committing:
 ```bash
@@ -425,6 +427,26 @@ Replaced raw map with sync.Map or guarded reads and writes with sync.RWMutex.
 
 ---
 
+## Anchor Semantics
+
+A guardrail is only useful while its anchors still describe the code it protects. `git-scars lint` and `git-scars check` therefore verify anchor semantics rather than trusting them:
+
+| Rule | Severity | Meaning |
+| :--- | :--- | :--- |
+| `anchor_symbol_missing` | `WARNING` | The anchored symbol no longer exists in any anchored file. |
+| `bad_pattern_present` | `ERROR` | The recorded footgun is still present in the anchored code. |
+| `good_pattern_absent` | `WARNING` | The recorded fix cannot be found, so the anchor likely no longer covers the fixed code. |
+| `missing_severity` | `WARNING` | An active guardrail does not declare a severity, so it cannot be compared against a blocking threshold. |
+
+`bad_pattern` and `good_pattern` must be **literal snippets of code**, so that presence and absence can be checked deterministically:
+
+- `good_pattern` is a snippet of the fixed code and must be present in an anchored file.
+- `bad_pattern` is a snippet of the footgun and must be absent from every anchored file.
+
+A pseudo-code pattern such as `m[key] = val` cannot be verified and will always be reported as absent.
+
+---
+
 ## AI Agent Integration & MCP Server
 
 ### 1. Model Context Protocol (MCP) Server
@@ -528,6 +550,8 @@ Exit Codes:
 - `0`: Clean (no blocking guardrails detected).
 - `2`: Blocked (blocking guardrail detected; outputs actionable `<dont>`, `<do>`, and verification instructions to stderr).
 
+A guardrail that does not declare a severity is treated as `high`, so an uncalibrated guardrail is never silently downgraded below the blocking threshold.
+
 Machine JSON Output:
 ```bash
 git-scars enforce --files "pkg/worker.go" --json
@@ -601,7 +625,7 @@ anchors:
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
 | `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
-| `lint` | none | Security and schema audit (checks traversal, injections, unloadable files, noisy scars) |
+| `lint` | none | Security, schema, and anchor-semantics audit (checks traversal, injections, unloadable files, anchor drift, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |

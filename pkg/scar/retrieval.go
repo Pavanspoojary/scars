@@ -308,12 +308,16 @@ func NormalizeErrorSignature(s string) string {
 // Recall retrieves scars matching query options.
 func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 	threshold := q.Threshold
-	if threshold <= 0 {
-		threshold = 3
-	}
 	topK := q.TopK
-	if topK <= 0 {
-		topK = 3
+	if threshold <= 0 || topK <= 0 {
+		// Fall back to the repository configuration for any unset limit.
+		cfg := s.LoadConfig()
+		if threshold <= 0 {
+			threshold = cfg.AbstainThreshold
+		}
+		if topK <= 0 {
+			topK = cfg.TopK
+		}
 	}
 
 	// Expand files from diff if diff_ref provided

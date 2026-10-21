@@ -447,6 +447,28 @@ A pseudo-code pattern such as `m[key] = val` cannot be verified and will always 
 
 ---
 
+## Repository Configuration
+
+`.gitscars/config.yaml` holds the repository-scoped retrieval limits and is created by `git-scars init`:
+
+```yaml
+# GitScars Configuration
+schema_version: "1"
+abstain_threshold: 3
+top_k: 3
+```
+
+| Key | Meaning |
+| :--- | :--- |
+| `abstain_threshold` | Minimum score a candidate must reach to be retrieved. Below it, GitScars abstains. |
+| `top_k` | Maximum number of scars returned by a single recall. |
+
+`git-scars recall --threshold` and `--top-k` override the configured values for one invocation. A value of `0` means "use the configured value". A missing, unreadable, or malformed configuration file falls back to the defaults, and an individual value that cannot be interpreted is ignored, so a configuration mistake never blocks retrieval.
+
+Injection, triage, and enforcement deliberately use a more sensitive threshold than the abstain threshold, because a guardrail that is worth injecting is worth surfacing before it reaches the abstain threshold.
+
+---
+
 ## AI Agent Integration & MCP Server
 
 ### 1. Model Context Protocol (MCP) Server
@@ -615,7 +637,7 @@ anchors:
 | `contradict` | `<id> --by <new-id> --rationale` | Transition scar to contradicted state with conflict reference |
 | `supersede` | `<id> --by <new-id>` | Supersede an obsolete scar by a successor scar |
 | `retire` | `<id>` | Retire a scar that is no longer applicable |
-| `recall` | `--files`, `--diff`, `--stdin`, `--json` | Retrieve relevant scars with deterministic multi-signal scoring |
+| `recall` | `--files`, `--diff`, `--stdin`, `--json`, `--threshold`, `--top-k` | Retrieve relevant scars with deterministic multi-signal scoring |
 | `enforce` | `--files`, `[--fail-on, --format, --staged, --json]` | Pre-edit blocking guardrail check (`--format sarif`, exit `0` clean, exit `2` blocked) |
 | `inject` | `[--files, --task, --budget, --format]` | Generate token-budgeted prompt guardrails with `<dont>` and `<do>` patterns |
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |

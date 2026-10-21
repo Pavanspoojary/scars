@@ -48,7 +48,7 @@ func (s *Store) Init() error {
 	}
 
 	// Write default config.yaml if missing
-	configPath := filepath.Join(s.RepoRoot, DefaultStoreDir, "config.yaml")
+	configPath := filepath.Join(s.RepoRoot, DefaultStoreDir, ConfigFileName)
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		defaultConfig := `# GitScars Configuration
 schema_version: "1"
@@ -56,7 +56,7 @@ abstain_threshold: 3
 top_k: 3
 `
 		if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
-			return fmt.Errorf("failed writing config.yaml: %w", err)
+			return fmt.Errorf("failed writing %s: %w", ConfigFileName, err)
 		}
 	}
 

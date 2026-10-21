@@ -591,8 +591,8 @@ func runRecall(store *scar.Store, args []string) error {
 	useStdin := fs.Bool("stdin", false, "Read error output or stack trace from stdin")
 	includeStale := fs.Bool("include-stale", false, "Include changed or unbaselined scars in search candidates")
 	asJSON := fs.Bool("json", false, "Emit versioned reposcars.recall.v1 JSON")
-	threshold := fs.Int("threshold", 3, "Abstain threshold score")
-	topK := fs.Int("top-k", 3, "Maximum scars to return")
+	threshold := fs.Int("threshold", 0, "Abstain threshold score (0 uses the configured value)")
+	topK := fs.Int("top-k", 0, "Maximum scars to return (0 uses the configured value)")
 
 	if err := fs.Parse(args); err != nil {
 		return err

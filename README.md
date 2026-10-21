@@ -425,6 +425,21 @@ Replaced raw map with sync.Map or guarded reads and writes with sync.RWMutex.
 
 ---
 
+## Anchor Semantics
+
+A guardrail is only useful while its anchors still describe the code it protects. `git-scars lint` and `git-scars check` therefore verify anchor semantics rather than trusting them:
+
+| Rule | Severity | Meaning |
+| :--- | :--- | :--- |
+| `anchor_symbol_missing` | `WARNING` | The anchored symbol no longer exists in any anchored file. |
+| `bad_pattern_present` | `ERROR` | The recorded footgun is still present in the anchored code. |
+| `good_pattern_absent` | `WARNING` | The recorded fix cannot be found, so the anchor likely no longer covers the fixed code. |
+| `missing_severity` | `WARNING` | An active guardrail does not declare a severity, so it cannot be compared against a blocking threshold. |
+
+`bad_pattern` and `good_pattern` must be **literal snippets extracted from the anchored files**. Presence and absence can then be checked deterministically. A pseudo-code pattern such as `m[key] = val` cannot be verified and will always be reported as absent.
+
+---
+
 ## AI Agent Integration & MCP Server
 
 ### 1. Model Context Protocol (MCP) Server
@@ -601,7 +616,7 @@ anchors:
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
 | `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
-| `lint` | none | Security and schema audit (checks traversal, injections, unloadable files, noisy scars) |
+| `lint` | none | Security, schema, and anchor-semantics audit (checks traversal, injections, unloadable files, anchor drift, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |

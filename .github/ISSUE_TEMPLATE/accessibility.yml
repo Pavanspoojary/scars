@@ -1,0 +1,39 @@
+name: Accessibility barrier
+description: Report something that blocks a person using assistive technology.
+title: "[A11Y] "
+labels: ["accessibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a barrier. Please omit secrets, tokens, and private paths.
+  - type: textarea
+    id: barrier
+    attributes:
+      label: What was blocked
+      description: Describe what you were trying to do and what prevented it.
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The git-scars command you ran and the output you received.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Assistive technology, operating system, and terminal.
+      placeholder: VoiceOver, macOS 15, Terminal.app
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What would have let you complete the task.
+    validations:
+      required: false

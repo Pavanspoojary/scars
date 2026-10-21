@@ -703,6 +703,8 @@ anchors:
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) for repository standards, code quality gates, and branching rules.
 
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). The accessibility commitment, supported environments, known limitations, and the process for reporting a barrier are described in [ACCESSIBILITY.md](ACCESSIBILITY.md).
+
 ---
 
 ## License

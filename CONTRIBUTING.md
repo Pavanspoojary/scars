@@ -35,4 +35,4 @@ Thank you for your interest in contributing to `git-scars`! We welcome contribut
 
 ## Code of Conduct
 
-Be respectful, collaborative, and constructive in all discussions, code reviews, and issue threads.
+This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Be respectful, collaborative, and constructive in all discussions, code reviews, and issue threads. Report unacceptable behavior through a private security advisory, as described in the code of conduct.

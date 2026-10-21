@@ -211,6 +211,21 @@ func runInit(store *scar.Store, args []string) error {
 	return nil
 }
 
+// splitFileList splits a list of paths separated by commas or newlines. The
+// newline form allows a file list to be piped directly from a git command.
+func splitFileList(s string) []string {
+	parts := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r'
+	})
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func runAdd(store *scar.Store, args []string) error {
 	if len(args) > 0 && args[0] == "from-commit" {
 		if len(args) < 2 {
@@ -264,15 +279,7 @@ func runAdd(store *scar.Store, args []string) error {
 		return fmt.Errorf("add requires --title (e.g. git-scars add --title \"Nil pointer in auth\" --lesson \"Check nil\" --files \"auth.go\"), interactive mode (-i), or add from-commit <sha>")
 	}
 
-	var files []string
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				files = append(files, f)
-			}
-		}
-	}
+	files := splitFileList(*filesStr)
 
 	var deps []scar.DependencyAnchor
 	if *depsStr != "" {
@@ -612,13 +619,7 @@ func runRecall(store *scar.Store, args []string) error {
 		TopK:         *topK,
 	}
 
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			if f = strings.TrimSpace(f); f != "" {
-				opts.Files = append(opts.Files, f)
-			}
-		}
-	}
+	opts.Files = splitFileList(*filesStr)
 	if *symbolsStr != "" {
 		for _, s := range strings.Split(*symbolsStr, ",") {
 			if s = strings.TrimSpace(s); s != "" {
@@ -1028,15 +1029,7 @@ func runInject(store *scar.Store, args []string) error {
 		return err
 	}
 
-	var files []string
-	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				files = append(files, f)
-			}
-		}
-	}
+	files := splitFileList(*filesStr)
 
 	var symbols []string
 	if *symbolsStr != "" {
@@ -1182,11 +1175,7 @@ func runEnforce(store *scar.Store, args []string) error {
 
 	var files []string
 	if *filesStr != "" {
-		for _, f := range strings.Split(*filesStr, ",") {
-			if f = strings.TrimSpace(f); f != "" {
-				files = append(files, f)
-			}
-		}
+		files = splitFileList(*filesStr)
 	}
 
 	if *staged && scar.GitAvailable(store.RepoRoot) {

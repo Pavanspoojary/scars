@@ -363,6 +363,12 @@ git-scars check --format sarif > git-scars.sarif
 git-scars enforce --files "pkg/auth.go" --format sarif
 ```
 
+Both reports can be uploaded to GitHub Code Scanning under separate categories, so anchor drift and guardrail matches appear as annotations on the changed lines of a pull request. The `--files` argument accepts a comma or newline separated list, so a file list can be piped directly from a git command:
+
+```bash
+git-scars enforce --files "$(git diff --name-only origin/main...HEAD)" --fail-on high --format sarif
+```
+
 ### 20. Multi-Language AST-Aware Freshness (Go, Python, TypeScript)
 GitScars includes built-in syntactic symbol hashing across multiple languages to eliminate reaffirm fatigue:
 - **Go**: Full AST symbol declaration extraction via `go/parser` and `go/ast`.

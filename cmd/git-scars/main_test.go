@@ -124,6 +124,34 @@ func TestVerifyExitCodeReflectsVerificationOutcome(t *testing.T) {
 	}
 }
 
+func TestSplitFileListAcceptsCommasAndNewlines(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"comma separated", "a.go,b.go", []string{"a.go", "b.go"}},
+		{"newline separated", "a.go\nb.go", []string{"a.go", "b.go"}},
+		{"mixed with whitespace", " a.go , b.go \n c.go ", []string{"a.go", "b.go", "c.go"}},
+		{"empty input", "", nil},
+		{"only separators", ",,\n", nil},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := splitFileList(tc.input)
+			if len(got) != len(tc.want) {
+				t.Fatalf("expected %v, got %v", tc.want, got)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("expected %v, got %v", tc.want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestCLIWorkflow(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-cli-test-*")
 	if err != nil {

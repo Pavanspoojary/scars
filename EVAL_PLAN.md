@@ -3,6 +3,7 @@
 **Date**: 2026-10-11  
 **Project**: GitScars (`git-scars`)  
 **Status**: Preregistered & Frozen for Test Evaluation  
+**Last measured**: 2026-10-21
 
 ---
 
@@ -41,6 +42,7 @@ Score = (Exact File Anchor    ? 5 : 0)
 - **Constraint**: At most one contribution per category.
 - **Abstain Threshold**: Score $\ge 3$. If max score $< 3$, the system abstains (returns 0 candidates, exit code 0).
 - **Top-K Limit**: At most 3 candidates, ordered by score descending, then stable ID ascending.
+- **Partial file signals**: same basename $+2$, same directory $+1$. These were introduced in ADR-0010 to recover moved files. They are below the abstain threshold on their own, but they may combine with another signal.
 
 ---
 
@@ -48,11 +50,28 @@ Score = (Exact File Anchor    ? 5 : 0)
 
 | Metric | Target / Threshold | Measurability in Current Environment | Current Measured Value |
 | :--- | :--- | :--- | :--- |
-| **Precision@3** | $\ge 0.70$ (70%) | Measurable on labeled benchmark | **1.000** (Test split) |
-| **Recall@3** | $\ge 0.70$ (70%) | Measurable on labeled benchmark | **1.000** (Test split) |
-| **No-Match FP Rate** | $\le 0.10$ (10%) | Measurable on labeled benchmark | **0.0%** (Test split) |
+| **Precision@3** | $\ge 0.70$ (70%) | Measurable on labeled benchmark | **1.000** (frozen test split) |
+| **Recall@3** | $\ge 0.70$ (70%) | Measurable on labeled benchmark | **1.000** (frozen test split) |
+| **No-Match FP Rate** | $\le 0.10$ (10%) | Measurable on labeled benchmark | **0.0%** (frozen test split) |
+| **Mean Reciprocal Rank** | Not preregistered | Measurable on labeled benchmark | **1.000** (frozen test split) |
+| **Abstain Rate** | Not preregistered | Measurable on labeled benchmark | **25.0%** (frozen test split) |
+| **Precision@3 under 50 keyword distractors** | Not preregistered | Measurable on labeled benchmark | **1.000** (no degradation) |
+| **Precision@3 under 25 basename-sharing decoys** | Not preregistered | Measurable on labeled benchmark | **0.778** (above the 0.70 target) |
 | **Median Authoring Time** | $\le 5$ minutes | **Not Measured** (Requires human panel) | N/A (Protocol below) |
 | **Agent Success Non-Inferiority** | Within 5% of Arm 1 | **Not Measured** (Requires external multi-agent harness) | N/A (Pilot protocol below) |
+
+The measured values above are produced by `pkg/scar/evaluation_test.go` and by `go run ./spike/eval.go`. The evaluation runs through the production retrieval path rather than a parallel reimplementation of the scoring rules, so the numbers describe the shipped tool.
+
+### 4.1 Measured Findings
+
+- **RQ1 is supported.** Precision@3 and Recall@3 are 1.000 on the frozen test split, the no-match false positive rate is 0.0%, and the mean reciprocal rank is 1.000. The tool abstains on 25% of queries, which is the intended behaviour when no candidate reaches the threshold.
+- **RQ2 is supported for realistic distractors.** Fifty decoys that overlap in wording but are anchored to unrelated code leave precision unchanged at 1.000. Keyword similarity alone does not produce a retrieval.
+- **RQ2 has a bounded cost under an adversarial construction.** Twenty-five decoys that share the *basename* of the target file, while living in an unrelated directory, reduce precision from 1.000 to 0.778. The decoys are retrieved through the same-basename signal combined with task term overlap. This is the direct consequence of the ADR-0010 trade-off: the same-basename fallback exists to recover files that were moved or renamed, and it cannot distinguish a moved file from an unrelated file that happens to share a name. The preregistered precision target of 0.70 still holds under this stress. An earlier revision of this document reported scale invariance by comparing a 10-scar catalogue against the full catalogue; that comparison was invalid, because the smaller catalogue simply did not contain the target scars of every query, and the lower figure measured catalogue coverage rather than retrieval quality.
+
+### 4.2 What Is Not Measured
+
+- **Median authoring time** and **agent task success** are not measurable in this environment. They require the human panel and the multi-agent harness described in section 5. No estimate is offered in their place.
+- **Arm 2 and Arm 3 token volumes** for real agent runs are not measured here. `SCENARIO_ANALYSIS.md` reports modelled prompt token footprints, which are heuristic estimates and are explicitly not agent measurements.
 
 ---
 
@@ -76,9 +95,14 @@ Score = (Exact File Anchor    ? 5 : 0)
 
 ---
 
-## 6. Spike Retrieval Results Summary
+## 6. Reproducing the Measurement
 
-Evaluated against `spike/dataset.json` (50 Scars, 20 Queries split into 8 dev, 12 test):
-- **Development Split**: Precision@3 = 1.00, Recall@3 = 1.00, No-Match FP Rate = 0.0%, Abstain Rate = 25.0%.
-- **Frozen Test Split**: Precision@3 = 1.00, Recall@3 = 1.00, No-Match FP Rate = 0.0%, Abstain Rate = 25.0%.
-- **Scale Invariance**: Zero false positives across 10-scar and 50-scar pools when distractor scars with overlapping words were introduced.
+```bash
+# Executable verification against the preregistered thresholds
+go test -race ./pkg/scar -run TestRetrievalEvaluation -v
+
+# Human-readable report across both splits and both distractor populations
+go run ./spike/eval.go
+```
+
+The benchmark dataset lives at `pkg/scar/testdata/retrieval_dataset.json` (50 Scars, 20 Queries split into 8 dev, 12 test). It is stored with the package that consumes it so that the labelled data and the code that measures it cannot drift apart unnoticed.

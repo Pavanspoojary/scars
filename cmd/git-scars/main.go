@@ -902,20 +902,24 @@ func runDiff(store *scar.Store, args []string) error {
 }
 
 func runStats(store *scar.Store, args []string) error {
+	fs := flag.NewFlagSet("stats", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "Emit machine-readable JSON metrics")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
 	stats, err := store.GetStats()
 	if err != nil {
 		return err
 	}
 
-	for _, a := range args {
-		if a == "--json" {
-			data, err := json.MarshalIndent(stats, "", "  ")
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(data))
-			return nil
+	if *asJSON {
+		data, err := json.MarshalIndent(stats, "", "  ")
+		if err != nil {
+			return err
 		}
+		fmt.Println(string(data))
+		return nil
 	}
 
 	fmt.Println("=== GitScars Repository Statistics ===")

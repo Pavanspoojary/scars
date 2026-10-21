@@ -155,7 +155,7 @@ func formatXMLInjection(scored []ScoredScar, budgetTokens int) string {
 
 func formatMarkdownInjection(scored []ScoredScar, budgetTokens int) string {
 	var included []string
-	header := "### 🛡️ Repository Scars & Guardrails\n"
+	header := "### Repository Scars & Guardrails\n"
 	currentTokens := EstimateTokens(header)
 	omitted := 0
 

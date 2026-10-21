@@ -107,13 +107,13 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 		if _, exists := rulesMap[ruleID]; !exists {
 			mdHelp := fmt.Sprintf("### %s\n\n**Lesson**: %s\n\n", sc.Scar.Title, sc.Scar.Lesson)
 			if sc.Scar.BadPattern != "" {
-				mdHelp += fmt.Sprintf("❌ **Avoid**:\n```\n%s\n```\n\n", sc.Scar.BadPattern)
+				mdHelp += fmt.Sprintf("**Avoid**:\n```\n%s\n```\n\n", sc.Scar.BadPattern)
 			}
 			if sc.Scar.GoodPattern != "" {
-				mdHelp += fmt.Sprintf("✅ **Recommended**:\n```\n%s\n```\n\n", sc.Scar.GoodPattern)
+				mdHelp += fmt.Sprintf("**Recommended**:\n```\n%s\n```\n\n", sc.Scar.GoodPattern)
 			}
 			if len(sc.Scar.Verifier.Argv) > 0 {
-				mdHelp += fmt.Sprintf("🔍 **Verifier**: `%s`\n", strings.Join(sc.Scar.Verifier.Argv, " "))
+				mdHelp += fmt.Sprintf("**Verifier**: `%s`\n", strings.Join(sc.Scar.Verifier.Argv, " "))
 			}
 
 			rulesMap[ruleID] = SARIFRule{

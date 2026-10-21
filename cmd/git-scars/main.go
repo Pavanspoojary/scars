@@ -879,10 +879,10 @@ func runDiff(store *scar.Store, args []string) error {
 	for _, res := range results {
 		switch res.Status {
 		case "current":
-			fmt.Printf("✓ [current] %s\n", res.FilePath)
+			fmt.Printf("[current] %s\n", res.FilePath)
 		case "modified":
 			allCurrent = false
-			fmt.Printf("✗ [MODIFIED] %s:\n%s\n", res.FilePath, res.Diff)
+			fmt.Printf("[MODIFIED] %s:\n%s\n", res.FilePath, res.Diff)
 		case "missing":
 			allCurrent = false
 			fmt.Printf("! [MISSING] %s\n", res.FilePath)
@@ -963,7 +963,7 @@ func runDoctor(store *scar.Store, args []string) error {
 		} else {
 			fmt.Println("Applied automated repairs:")
 			for _, act := range actions {
-				fmt.Printf("  ✓ %s\n", act)
+				fmt.Printf("  [ok] %s\n", act)
 			}
 			fmt.Println()
 		}
@@ -985,14 +985,14 @@ func runDoctor(store *scar.Store, args []string) error {
 
 	fmt.Println("=== GitScars System Diagnostics ===")
 	for _, c := range report.Checks {
-		symbol := "✓"
+		symbol := "ok"
 		switch c.Status {
 		case "OK":
-			symbol = "✓"
+			symbol = "ok"
 		case "WARN":
-			symbol = "!"
+			symbol = "warn"
 		case "FAIL":
-			symbol = "✗"
+			symbol = "fail"
 		}
 		fmt.Printf("[%s] %-22s %s\n", symbol, c.Name+":", c.Message)
 		for _, d := range c.Details {
@@ -1475,12 +1475,12 @@ func runHeal(store *scar.Store, args []string) error {
 	}
 
 	if report.Success {
-		fmt.Printf("✓ Command %q succeeded in %dms (exit code 0)\n",
+		fmt.Printf("Command %q succeeded in %dms (exit code 0)\n",
 			strings.Join(report.Command, " "), report.DurationMs)
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "✗ Command %q failed with exit code %d (%dms)\n",
+	fmt.Fprintf(os.Stderr, "Command %q failed with exit code %d (%dms)\n",
 		strings.Join(report.Command, " "), report.ExitCode, report.DurationMs)
 
 	if report.Language != "" || report.FailureKind != "" {

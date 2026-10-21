@@ -152,7 +152,7 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 				Tool: SARIFTool{
 					Driver: SARIFDriver{
 						Name:           "git-scars",
-						Version:        "1.3.1",
+						Version:        Version,
 						InformationURI: "https://github.com/Pavanspoojary/scars",
 						Rules:          rules,
 					},
@@ -246,7 +246,7 @@ func FormatCheckSARIF(scars []ScarSummary, invariantErrors []string) ([]byte, er
 				Tool: SARIFTool{
 					Driver: SARIFDriver{
 						Name:           "git-scars",
-						Version:        "1.3.1",
+						Version:        Version,
 						InformationURI: "https://github.com/Pavanspoojary/scars",
 						Rules:          rules,
 					},

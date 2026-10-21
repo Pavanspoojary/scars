@@ -16,8 +16,6 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
-const version = "1.3.1"
-
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -92,7 +90,7 @@ func run(args []string) error {
 	case "triage":
 		return runTriage(store, args[1:])
 	case "version", "--version", "-v":
-		fmt.Printf("git-scars version %s\n", version)
+		fmt.Printf("git-scars version %s\n", scar.Version)
 		return nil
 	case "help", "-h", "--help":
 		printUsage()
@@ -140,7 +138,7 @@ Lifecycle Commands:
   feedback <id>   Record feedback on retrieval utility (--rating, --notes)
   version         Print git-scars version
   help            Show this help text
-`, version)
+`, scar.Version)
 }
 
 func findRepoRoot() string {

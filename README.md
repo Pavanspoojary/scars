@@ -431,6 +431,8 @@ Replaced raw map with sync.Map or guarded reads and writes with sync.RWMutex.
 
 GitScars provides a built-in stdio Model Context Protocol (MCP) server for native integration with coding assistants:
 
+The server reports the current release version in its `initialize` response, so client-visible metadata stays aligned with the CLI banner and SARIF tool metadata.
+
 ```bash
 git-scars mcp
 ```

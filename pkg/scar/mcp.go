@@ -81,7 +81,7 @@ func handleMCPRequest(store *Store, req JSONRPCRequest, out io.Writer) {
 			"protocolVersion": "2024-11-05",
 			"serverInfo": map[string]string{
 				"name":    "git-scars-mcp",
-				"version": "1.1.0",
+				"version": Version,
 			},
 			"capabilities": map[string]interface{}{
 				"tools":     map[string]interface{}{},

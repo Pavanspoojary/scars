@@ -36,3 +36,7 @@ Thank you for your interest in contributing to `git-scars`! We welcome contribut
 ## Code of Conduct
 
 This project follows the [Contributor Covenant](CODE_OF_CONDUCT.md). Be respectful, collaborative, and constructive in all discussions, code reviews, and issue threads. Report unacceptable behavior through a private security advisory, as described in the code of conduct.
+
+## Support
+
+Questions, bug reports, and accessibility barriers are handled through the issue templates, as described in [SUPPORT.md](SUPPORT.md). Include `git-scars doctor` output and the exact command, which resolves most reports without a follow-up.

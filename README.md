@@ -159,6 +159,8 @@ git-scars verify nil-pointer-dereference-8a1b3f --interactive
 ```
 Computes deterministic command hashes, scrubs the environment, redacts secrets, and tests the worktree.
 
+The procedure verifies the worktree in both directions. It runs the verifier on the current tree, then creates a detached worktree at the recorded base commit, overlays the test files of the fix commit onto it, and runs the verifier there. The scar is recorded as `fail_to_pass` only when the verifier passes on the current tree and fails at the base. A base that also passes is reported as a failure to reproduce, and an inconclusive result is reported honestly as an exception.
+
 The command exits `1` when verification does not produce a passable result, so CI pipelines can gate on it. Recorded evidence never promotes a scar on its own: a human reviewer must still run `git-scars promote`.
 
 ### 4. Review and Promote
@@ -312,6 +314,8 @@ Bootstrap repository memory by walking Git history to identify past bug-fixing c
 - **Diff-Size Cap (`--max-files 5`)**: Automatically ignores commits touching `> 5` files to avoid noisy reformatting, mass migrations, and large multi-package refactors.
 - **Co-Located Test Requirement**: Skips commits without co-located test updates by default to guarantee verified test behavior (override with `--allow-untested`).
 - **Confidence Scoring (`--min-confidence 7`)**: Computes a 1-10 quality confidence score based on message clarity, test co-location, and scope; drafts scoring below 7 are rejected to prevent human review fatigue.
+
+Each mined draft records the fix commit and its first parent, so the draft can be verified as a genuine fail-to-pass regression rather than an exception.
 
 ```bash
 # Preview high-confidence candidate bug fixes in recent commit history (dry run)
@@ -653,7 +657,7 @@ anchors:
 | `sync` | `[--targets <files>]` | Synchronize active scars into AGENTS.md / CLAUDE.md |
 | `triage` | `[--error <text>, --json]` | Diagnose test failures and panic traces against recorded scars |
 | `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
-| `harvest` | `[--max <n>, --since <ref>, --dry-run, --json]` | Automatically mine bug-fixing commits from Git history into scar drafts |
+| `harvest` | `[--max <n>, --since <ref>, --dry-run, --json, --max-files <n>, --min-confidence <n>, --allow-untested]` | Automatically mine bug-fixing commits from Git history into scar drafts |
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
 | `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions (exit `4` when the observed command failed) |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |

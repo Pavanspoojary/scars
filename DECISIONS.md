@@ -333,3 +333,36 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Output is portable across terminals and fonts, and conforms to the repository standard.
   - The changes are additive and do not invalidate any recorded scar, so the release is versioned as a minor increment.
 
+---
+
+## ADR-0019: Measured Evaluation, Fail-to-Pass Reproduction, and a Populated Catalogue
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - The retrieval evaluation reimplemented the scoring rules in a parallel copy, so the published metrics described a copy of the algorithm rather than the algorithm itself.
+  - The scale invariance claim compared a ten scar catalogue against the full catalogue. The smaller catalogue did not contain the target scars of every query, so the comparison measured catalogue coverage rather than retrieval quality.
+  - The verification command passed no test files to the fail-to-pass procedure. The base commit was therefore checked with the tests that already existed at the base. A regression test is normally introduced by the fix commit, so the base ran without it, passed, and every genuine regression was reported as not reproducible. The fail-to-pass claim could not be established through the command that is supposed to establish it.
+  - Mined drafts carried no commit references, so they could only ever be verified as an exception.
+  - The catalogue held a single seed scar for the whole history of the repository.
+  - The protection against YAML aliases rejected any frontmatter line containing an asterisk or an ampersand, including a quoted value. A recorded pattern containing a pointer dereference made the whole record unloadable.
+  - The anchor symbol lint rule was a warning, so a guardrail anchored to a symbol that no longer existed was reported but never blocked.
+  - Continuous integration annotated guardrail matches but discarded the exit code, so a change that reintroduced a known regression was annotated and then merged.
+- **Decision**:
+  - The evaluation measures the production retrieval path. The benchmark dataset is stored with the package that consumes it.
+  - Two distractor populations are measured: decoys that overlap in wording with disjoint code anchors, and decoys that share the basename of the target file.
+  - The verification overlays the test files of the fix commit onto the base worktree.
+  - Mined drafts record the fix commit and its first parent, and the mined lesson states what the commit fixed.
+  - The alias rejection inspects only the unquoted parts of a frontmatter line.
+  - The anchor symbol lint rule is an error, and a symbol anchor is satisfied by a declaration or by any occurrence of the name in the anchored file.
+  - Continuous integration fails the job when the pre-edit check blocks, while still emitting the SARIF report.
+  - The catalogue is populated with the real defects that were found and fixed, each verified as a genuine fail-to-pass regression.
+- **Consequences**:
+  - The published metrics describe the shipped tool. The preregistered precision target of 0.70 and false positive limit of 0.10 hold on the frozen test split, measured at 1.000 and 0.0%.
+  - RQ2 is supported for realistic distractors, which leave precision unchanged. Under the adversarial basename construction precision falls to 0.778, which isolates and records the cost of the ADR-0010 trade-off.
+  - The earlier scale invariance claim is withdrawn as invalid.
+  - Verification genuinely reproduces a regression. A regression test that fails at the base and passes at the fix is recorded as fail_to_pass.
+  - The catalogue contains nine active memories, each anchored to the code that carries the defect and each backed by a verifier that reproduces it.
+  - A quoted pattern containing a pointer dereference no longer makes a record unloadable.
+  - The stricter lint severity and the blocking continuous integration step may fail pipelines that previously passed, which is a breaking change for a repository that relied on either being permissive.
+

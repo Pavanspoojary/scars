@@ -76,6 +76,7 @@ func TestStoreRunDoctorHealthy(t *testing.T) {
 		"Pre-Commit Hook",
 		"Trust List",
 		"Index Cache",
+		"Configuration",
 	}
 
 	for _, name := range expectedChecks {

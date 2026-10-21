@@ -81,6 +81,7 @@ The measured values above are produced by `pkg/scar/evaluation_test.go` and by `
 - **Participants**: 5 professional software engineers.
 - **Task**: Given a commit diff that resolved a regression, create a new Scar using `git-scars add from-commit <sha>` and review the resulting draft.
 - **Measurement**: Wall-clock duration from command start to finalized, committed Scar. If median $> 5$ minutes, the low-friction capture hypothesis is rejected.
+- **Log format and execution**: each session is recorded as `{"engineer", "task_id", "started_at", "finished_at"}` with RFC 3339 timestamps. `git-scars eval-authoring --log <sessions.json>` validates every session and reports the median, the range, and the verdict against the five minute target. The protocol has no recorded sessions yet, so the measurement remains Not Measured.
 
 ### 5.2 Protocol for Agent Task Success and Sample Size Calculation
 - **Non-inferiority Margin ($\Delta$)**: 5% ($\Delta = 0.05$).
@@ -91,7 +92,12 @@ The measured values above are produced by `pkg/scar/evaluation_test.go` and by `
   $$n = \frac{2 \cdot (Z_{1-\alpha} + Z_{1-\beta})^2 \cdot p(1-p)}{\Delta^2}$$
   With $Z_{0.95} = 1.645$ and $Z_{0.80} = 0.842$:
   $$n \approx \frac{2 \cdot (2.487)^2 \cdot (0.75 \cdot 0.25)}{0.0025} \approx \frac{12.37 \cdot 0.1875}{0.0025} \approx 928 \text{ task evaluations}$$
-- **Conclusion**: With $<30$ recurrence tasks currently available, any agent-level evaluation in this phase is strictly labeled a **Pilot Study**. Confirmatory claims are deferred until large-scale test harnesses are executed.
+- **Test statistic (paired)**: each task is attempted by both Arm 1 and Arm 3, and the difference $d_i = x_{3,i} - x_{1,i} \in \{-1, 0, +1\}$ is recorded. The comparison uses the paired construction of Newcombe with $w_i = d_i + \Delta$:
+  $$z = \sqrt{n} \cdot \frac{\bar{w}}{\operatorname{sd}(w)}$$
+  where $\bar{w}$ is the mean of $w_i$ (equal to $\hat{p}_3 - \hat{p}_1 + \Delta$). The null hypothesis $p_3 \le p_1 - \Delta$ is rejected when $z > 1.645$. When the paired variance degenerates to zero, the statistic is $\pm\infty$ depending on the sign of $\hat{p}_3 - \hat{p}_1 + \Delta$. The implementation uses the plan's rounded quantiles, so the arithmetic reproduces the sample size exactly.
+- **Corpus format and execution**: the recorded outcomes live in a JSON corpus of `{"task_id", "arm", "passed"}` records, one per task per arm, with the arm names `no_memory`, `flat_monolith`, `all_scars`, and `selective_retrieval`. A task where one of the two compared arms is absent is excluded from the pairing and named in the report. An unknown arm, a duplicate task/arm pair, or a record without a task identifier is rejected rather than entering the statistics.
+- **Conclusion**: With $<30$ recurrence tasks currently available, any agent-level evaluation in this phase is strictly labeled a **Pilot Study**. Confirmatory claims are deferred until large-scale test harnesses are executed. The tooling labels the result itself: a corpus with fewer paired evaluations than the preregistered $n$ is reported as a pilot, and no pilot outcome is ever rendered as a confirmatory claim.
+- **Agent-level success protocol remains Not Measured**: no agent runs have been recorded on a task corpus, and this repository does not simulate them. The machinery executes the arithmetic on whatever outcomes an external harness records.
 
 ---
 
@@ -103,6 +109,14 @@ go test -race ./pkg/scar -run TestRetrievalEvaluation -v
 
 # Human-readable report across both splits and both distractor populations
 go run ./spike/eval.go
+
+# Agent-level machinery (executed arithmetic on a recorded corpus, not a
+# confirmation): paired non-inferiority of the selective retrieval arm
+# against the flat monolith arm, labeled a pilot below 928 pairs
+git-scars eval-agents --report <recorded_corpus.json>
+
+# Human authoring protocol summary against the five minute median target
+git-scars eval-authoring --log <recorded_sessions.json>
 ```
 
 The benchmark dataset lives at `pkg/scar/testdata/retrieval_dataset.json` (50 Scars, 20 Queries split into 8 dev, 12 test). It is stored with the package that consumes it so that the labelled data and the code that measures it cannot drift apart unnoticed.

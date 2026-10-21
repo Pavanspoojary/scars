@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -87,6 +88,10 @@ func run(args []string) error {
 		return runDiff(store, args[1:])
 	case "stats":
 		return runStats(store, args[1:])
+	case "eval-agents":
+		return runEvalAgents(args[1:])
+	case "eval-authoring":
+		return runEvalAuthoring(args[1:])
 	case "doctor":
 		return runDoctor(store, args[1:])
 	case "inject":
@@ -138,6 +143,8 @@ Lifecycle Commands:
   lint            Audit scars for security, wildcards, and schema validity
   doctor          Run repository diagnostics and health checks (--json, --fix)
   stats           Display repository metrics and feedback statistics (--json)
+  eval-agents     Analyse a recorded multi-agent corpus against the preregistered non-inferiority protocol (--report <file>)
+  eval-authoring  Summarise a human authoring log against the five minute target (--log <file>)
   index           Rebuild .gitscars/.local/index.json fast cache
   hook            Manage Git pre-commit hook (install, uninstall, status)
   mcp             Run read-only stdio Model Context Protocol (MCP) server
@@ -959,6 +966,101 @@ func runStats(store *scar.Store, args []string) error {
 		fmt.Println("Feedback Summary:    No feedback recorded yet (.gitscars/.local/feedback.jsonl)")
 	}
 
+	return nil
+}
+
+// runEvalAgents analyses a recorded multi-agent corpus under the preregistered
+// protocol in EVAL_PLAN.md section 5.2. The command computes the paired
+// one-sided non-inferiority comparison of the selective retrieval arm against
+// the flat monolith arm from whatever outcomes were recorded; it never
+// simulates the arms itself.
+func runEvalAgents(args []string) error {
+	fs := flag.NewFlagSet("eval-agents", flag.ContinueOnError)
+	reportPath := fs.String("report", "", "Path to a JSON corpus of per-task arm outcomes")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *reportPath == "" {
+		return fmt.Errorf("usage: git-scars eval-agents --report <corpus.json>")
+	}
+
+	records, err := scar.LoadAgentEvalCorpus(*reportPath)
+	if err != nil {
+		return err
+	}
+	report, err := scar.EvaluateAgentArms(records)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("=== GitScars Agent-Level Non-Inferiority Analysis (EVAL_PLAN 5.2) ===")
+	fmt.Println("Arms recorded:")
+	for _, o := range report.ArmObserved {
+		fmt.Printf("  %-20s %d task(s), pass rate %.3f\n", o.Arm, o.Tasks, o.PassRate)
+	}
+	if len(report.Excluded) > 0 {
+		fmt.Printf("Excluded from pairing (one comparison arm absent): %d task(s)\n", len(report.Excluded))
+		for _, id := range report.Excluded {
+			fmt.Printf("  - %s\n", id)
+		}
+	}
+	fmt.Println()
+	fmt.Printf("Preregistered parameters: delta %.2f, alpha %.2f (one-sided), power %.2f, assumed p %.2f\n",
+		scar.AgentEvalDelta, scar.AgentEvalAlpha, scar.AgentEvalPower, scar.AgentEvalAssumedP)
+	fmt.Printf("Required paired evaluations at those assumptions: %d\n", report.Required)
+	fmt.Printf("Paired task evaluations available:               %d\n", report.Paired)
+	fmt.Printf("Arm 1 (flat monolith) pass rate:                 %.3f\n", report.P1)
+	fmt.Printf("Arm 3 (selective retrieval) pass rate:           %.3f\n", report.P3)
+	fmt.Printf("Difference (arm 3 minus arm 1):                  %+.3f\n", report.P3-report.P1)
+
+	if math.IsInf(report.ZStat, 0) {
+		fmt.Printf("Paired non-inferiority z statistic:              %s (degenerate paired variance)\n",
+			map[bool]string{true: "+infinity", false: "-infinity"}[math.IsInf(report.ZStat, 1)])
+	} else {
+		fmt.Printf("Paired non-inferiority z statistic:              %.4f\n", report.ZStat)
+	}
+	fmt.Printf("Decision threshold (Z 1-alpha):                  %.3f\n", report.ZAlpha)
+	fmt.Printf("Decision:                                        %s\n", report.Decision)
+
+	if report.Study == "pilot" {
+		fmt.Println()
+		fmt.Printf("PILOT STUDY: %d of %d required paired evaluations. A pilot outcome can\n", report.Paired, report.Required)
+		fmt.Println("never support a confirmatory claim; it may only justify (or question)")
+		fmt.Println("running the full preregistered evaluation.")
+	}
+	return nil
+}
+
+// runEvalAuthoring summarises a human authoring log under the protocol in
+// EVAL_PLAN.md section 5.1.
+func runEvalAuthoring(args []string) error {
+	fs := flag.NewFlagSet("eval-authoring", flag.ContinueOnError)
+	logPath := fs.String("log", "", "Path to a JSON log of authoring sessions")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *logPath == "" {
+		return fmt.Errorf("usage: git-scars eval-authoring --log <sessions.json>")
+	}
+
+	entries, err := scar.LoadAgentAuthoringLog(*logPath)
+	if err != nil {
+		return err
+	}
+	report, err := scar.EvaluateAuthoringLog(entries)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("=== GitScars Authoring Effort Analysis (EVAL_PLAN 5.1) ===")
+	fmt.Printf("Sessions recorded:  %d\n", report.Sessions)
+	fmt.Printf("Median duration:    %.1f minutes\n", report.MedianMinutes)
+	fmt.Printf("Range:              %.1f to %.1f minutes\n", report.MinMinutes, report.MaxMinutes)
+	fmt.Printf("Target (median):    %.1f minutes\n", report.TargetMinutes)
+	fmt.Printf("Verdict:            %s\n", report.Verdict)
+	if report.Verdict != "target_met" {
+		fmt.Println("The low-friction capture hypothesis is rejected for this log.")
+	}
 	return nil
 }
 

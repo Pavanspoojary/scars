@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -160,4 +161,99 @@ func TestHarvestCommits(t *testing.T) {
 	if secondResult.DraftsCreated != 0 {
 		t.Errorf("expected 0 drafts created on duplicate run, got %d", secondResult.DraftsCreated)
 	}
+}
+
+// TestHarvestConfidenceCountsBodyReferencesAndCappedScope verifies the two
+// refinements of the confidence model. An issue reference cited only in the
+// commit body is counted, and the scope signal is the diff-size cap itself so
+// that a capped fix carrying co-located tests reaches the review bar without
+// an external issue reference.
+func TestHarvestConfidenceCountsBodyReferencesAndCappedScope(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v\n%s", args, err, out)
+		}
+	}
+	write := func(rel, content string) {
+		t.Helper()
+		full := filepath.Join(tmpDir, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatalf("failed creating dir for %s: %v", rel, err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+			t.Fatalf("failed writing %s: %v", rel, err)
+		}
+	}
+
+	run("init", "-q")
+	run("config", "user.email", "ci@example.com")
+	run("config", "user.name", "CI Builder")
+
+	store := NewStore(tmpDir)
+	if err := store.Init(); err != nil {
+		t.Fatalf("store init failed: %v", err)
+	}
+
+	// A conventional base commit, then two capped fix commits.
+	write("pkg/base.go", "package pkg\nfunc Base() int { return 0 }\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "chore: initial import")
+
+	// Fix A: exactly five files with a co-located test and no reference.
+	write("pkg/core.go", "package pkg\nfunc Core() int { return 1 }\n")
+	write("pkg/core2.go", "package pkg\nfunc Core2() int { return 1 }\n")
+	write("pkg/core3.go", "package pkg\nfunc Core3() int { return 1 }\n")
+	write("pkg/core4.go", "package pkg\nfunc Core4() int { return 1 }\n")
+	write("pkg/core_test.go", "package pkg\nimport \"testing\"\nfunc TestCore(t *testing.T){ if Core() != 1 { t.Fatal(\"regression\") } }\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "fix: guard the core computation")
+
+	// Fix B: five files whose issue reference appears only in the body.
+	write("pkg/key.go", "package pkg\nfunc Key() int { return 2 }\n")
+	write("pkg/key2.go", "package pkg\nfunc Key2() int { return 2 }\n")
+	write("pkg/key3.go", "package pkg\nfunc Key3() int { return 2 }\n")
+	write("pkg/key4.go", "package pkg\nfunc Key4() int { return 2 }\n")
+	write("pkg/key_test.go", "package pkg\nimport \"testing\"\nfunc TestKey(t *testing.T){ if Key() != 2 { t.Fatal(\"regression\") } }\n")
+	run("add", "-A")
+	run("commit", "-q", "-m", "fix: guard the key computation", "-m", "Closes #417")
+
+	result, err := store.HarvestCommits(HarvestOptions{
+		DryRun:        true,
+		MaxCommits:    5,
+		MaxFiles:      5,
+		MinConfidence: 7,
+		AllowUntested: false,
+	})
+	if err != nil {
+		t.Fatalf("harvest failed: %v", err)
+	}
+
+	if result.FoundFixes != 2 {
+		t.Fatalf("expected both capped fix commits to reach the review bar, got %d", result.FoundFixes)
+	}
+	for _, cand := range result.Candidates {
+		if cand.Confidence < 7 {
+			t.Errorf("expected confidence >= 7 for %q, got %d with reasons %q", cand.Subject, cand.Confidence, cand.Reason)
+		}
+	}
+	bySubject := map[string]string{}
+	for _, cand := range result.Candidates {
+		bySubject[cand.Subject] = cand.Reason
+	}
+	if !containsLiteral(bySubject["fix: guard the key computation"], "issue_ref(+3)") {
+		t.Errorf("expected the body cited issue reference to be counted, got reasons %q", bySubject["fix: guard the key computation"])
+	}
+	if !containsLiteral(bySubject["fix: guard the core computation"], "test_colocated(+3)") {
+		t.Errorf("expected co-located tests to be counted, got reasons %q", bySubject["fix: guard the core computation"])
+	}
+}
+
+func containsLiteral(haystack, needle string) bool {
+	return strings.Contains(haystack, needle)
 }

@@ -3,6 +3,7 @@ package scar
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -199,5 +200,137 @@ func TestMCPServerTwoWayToolsAndResources(t *testing.T) {
 	resources := resMap["resources"].([]interface{})
 	if len(resources) < 2 {
 		t.Errorf("expected at least 2 resources, got %d", len(resources))
+	}
+}
+
+// TestMCPServerCoversCommandFileSymbolAndSeverityArguments exercises the
+// arguments the composite surfaces gained: command anchors in recall and in
+// planning, file scoping in triage, symbol and task scoping in injection, and
+// symbol and severity fields on a drafted scar.
+func TestMCPServerCoversCommandFileSymbolAndSeverityArguments(t *testing.T) {
+	tmpDir, _ := os.MkdirTemp("", "gitscars-mcp-coverage-*")
+	defer os.RemoveAll(tmpDir)
+
+	store := NewStore(tmpDir)
+	_ = store.Init()
+
+	// Scar A: anchored by the command that the task will run.
+	a, _, _ := store.CreateDraft("Race In Exporter", "Protect the metrics map", []string{"pkg/telemetry/exporter.go"})
+	a.Lifecycle.State = LifecycleActive
+	a.Review.Status = ReviewApproved
+	a.Severity = "high"
+	a.Anchors.Commands = []string{"go test -race ./pkg/telemetry/..."}
+	a.Anchors.ErrorSignatures = []string{"fatal error: concurrent map writes"}
+	a.Verifier = failToPassVerifier("go", "test", "-race", "./pkg/telemetry/...")
+	_ = os.MkdirAll(filepath.Join(tmpDir, "pkg", "telemetry"), 0755)
+	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/telemetry/exporter.go"), []byte("package telemetry\n"), 0644)
+	_ = store.RecordBaseline(a, a.Verifier.CommandHash)
+	_, _ = store.SaveScar(a)
+
+	// Scar B: anchored by a symbol, for the injection assertions.
+	b, _, _ := store.CreateDraft("Symbol Guard", "Guard the record function", []string{"pkg/telemetry/metrics.go"})
+	b.Lifecycle.State = LifecycleActive
+	b.Review.Status = ReviewApproved
+	b.Severity = "medium"
+	b.Anchors.Symbols = []string{"RecordMetric"}
+	b.Verifier = failToPassVerifier("go", "test", "-race", "./pkg/telemetry/...")
+	_ = os.WriteFile(filepath.Join(tmpDir, "pkg/telemetry/metrics.go"), []byte("package telemetry\n\nfunc RecordMetric() {}\n"), 0644)
+	_ = store.RecordBaseline(b, b.Verifier.CommandHash)
+	_, _ = store.SaveScar(b)
+
+	call := func(name string, arguments string) string {
+		t.Helper()
+		req := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":%q,"arguments":%s}}`+"\n", name, arguments)
+		var out bytes.Buffer
+		if err := store.ServeMCP(bytes.NewBufferString(req), &out); err != nil {
+			t.Fatalf("ServeMCP error: %v", err)
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if len(lines) == 0 {
+			t.Fatalf("expected a response for %s, got none", name)
+		}
+		var resp JSONRPCResponse
+		if err := json.Unmarshal([]byte(lines[0]), &resp); err != nil {
+			t.Fatalf("failed unmarshaling response: %v\n%s", err, out.String())
+		}
+		if resp.Result == nil {
+			t.Fatalf("expected a result for %s, got: %v", name, resp.Error)
+		}
+		content := resp.Result.(map[string]interface{})["content"].([]interface{})
+		return content[0].(map[string]interface{})["text"].(string)
+	}
+
+	// A command anchor contributes two points, which a task term lifts
+	// past the threshold.
+	if got := call("recall_scars", `{"commands":["go test -race ./pkg/telemetry/..."],"task":"protect the metrics map"}`); !strings.Contains(got, "Race In Exporter") {
+		t.Errorf("expected a command anchored scar to be recalled, got: %s", got)
+	}
+
+	if got := call("recall_scars", `{"files":["pkg/telemetry/exporter.go"]}`); !strings.Contains(got, `"count": 1`) && !strings.Contains(got, `"count":1`) {
+		t.Errorf("expected file retrieval to honour the configured default threshold, got: %s", got)
+	}
+
+	// A configured abstain threshold above every achievable score defers
+	// retrieval, which proves the tool defers to configuration instead of the
+	// previously hardcoded recall limits.
+	if err := os.MkdirAll(filepath.Join(tmpDir, DefaultStoreDir), 0755); err != nil {
+		t.Fatalf("failed creating store dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(tmpDir, DefaultStoreDir, ConfigFileName), []byte("schema_version: \"1\"\nabstain_threshold: 9\ntop_k: 3\n"), 0644); err != nil {
+		t.Fatalf("failed writing config: %v", err)
+	}
+	if got := call("recall_scars", `{"files":["pkg/telemetry/exporter.go"]}`); !strings.Contains(got, `"count": 0`) && !strings.Contains(got, `"count":0`) {
+		t.Errorf("expected the configured threshold to govern recall, got: %s", got)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, DefaultStoreDir, ConfigFileName), []byte("schema_version: \"1\"\nabstain_threshold: 3\ntop_k: 3\n"), 0644); err != nil {
+		t.Fatalf("failed restoring config: %v", err)
+	}
+
+	if got := call("triage_error", `{"error_output":"fatal error: concurrent map writes\npkg/telemetry/exporter.go:12\n","files":["pkg/telemetry/exporter.go"]}`); !strings.Contains(got, "Race In Exporter") {
+		t.Errorf("expected triage to use the supplied files, got: %s", got)
+	}
+
+	if got := call("inject_guardrails", `{"symbols":["RecordMetric"],"task":"touch the record function"}`); !strings.Contains(got, "Symbol Guard") {
+		t.Errorf("expected injection to honour the symbol anchor, got: %s", got)
+	}
+
+	// Injection is deliberately more sensitive than recall: a task term
+	// overlap of two points is enough there, while recall would abstain.
+	if got := call("inject_guardrails", `{"task":"protect the metrics map"}`); !strings.Contains(got, "Race In Exporter") {
+		t.Errorf("expected injection to honour the task terms, got: %s", got)
+	}
+
+	// The recall behind planning carries the command and error signature
+	// signals the caller supplied.
+	planned := call("plan_task", `{"task":"fix the telemetry race","files":["pkg/telemetry/exporter.go"],"commands":["go test -race ./pkg/telemetry/..."],"error_signature":"fatal error: concurrent map writes"}`)
+	var plannedReport struct {
+		MatchesCount int `json:"matches_count"`
+		Matches      []ScoredScar
+	}
+	if err := json.Unmarshal([]byte(planned), &plannedReport); err != nil {
+		t.Fatalf("failed unmarshaling plan_task output: %v\n%s", err, planned)
+	}
+	if plannedReport.MatchesCount != 1 || len(plannedReport.Matches) != 1 {
+		t.Fatalf("expected one anchored plan candidate, got %d", plannedReport.MatchesCount)
+	}
+	joined := strings.Join(plannedReport.Matches[0].Matches, ",")
+	if !strings.Contains(joined, "file(+5)") || !strings.Contains(joined, "command(+2)") || !strings.Contains(joined, "error_sig(+3)") {
+		t.Errorf("expected the plan candidate to carry the file, command, and error signature signals, got %q", joined)
+	}
+
+	created := call("draft_scar", `{"title":"Draft With Symbols","lesson":"Anchor symbols as well","severity":"medium","symbols":["DraftRecord"]}`)
+	if !strings.Contains(created, `"status": "draft_created"`) && !strings.Contains(created, `"status":"draft_created"`) {
+		t.Errorf("expected the enriched draft to be created, got: %s", created)
+	}
+
+	var createdRecord struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal([]byte(created), &createdRecord); err != nil {
+		t.Fatalf("failed reading the created draft id: %v", err)
+	}
+	if got := call("get_scar", `{"id":"`+createdRecord.ID+`"}`); !strings.Contains(got, `"medium"`) || !strings.Contains(got, "DraftRecord") {
+		t.Errorf("expected the drafted scar to carry its symbols and severity, got: %s", got)
 	}
 }

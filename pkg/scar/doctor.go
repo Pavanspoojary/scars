@@ -188,7 +188,35 @@ func (s *Store) RunDoctor() *DoctorReport {
 		}
 	}
 
+	// 7. Repository Configuration Check
+	addConfigurationCheck(s, addCheck)
+
 	return report
+}
+
+// addConfigurationCheck reports the effective retrieval configuration and any
+// entry of the configuration file that was present but could not be used. An
+// unused entry is a warning rather than an error, because retrieval falls back
+// to the documented defaults instead of failing.
+func addConfigurationCheck(s *Store, addCheck func(name, status, message string, details ...string)) {
+	path := filepath.Join(s.RepoRoot, DefaultStoreDir, ConfigFileName)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		cfg := DefaultConfig()
+		addCheck("Configuration", "OK", fmt.Sprintf("No configuration file; defaults in force (abstain_threshold %d, top_k %d)", cfg.AbstainThreshold, cfg.TopK))
+		return
+	}
+
+	cfg, issues := s.LoadConfigWithIssues()
+	if len(issues) > 0 {
+		details := make([]string, 0, len(issues))
+		for _, issue := range issues {
+			details = append(details, issue.Reason)
+		}
+		addCheck("Configuration", "WARN", fmt.Sprintf("%d configuration entr(y) of %s could not be used", len(issues), ConfigFileName), details...)
+		return
+	}
+
+	addCheck("Configuration", "OK", fmt.Sprintf("Configuration in force (abstain_threshold %d, top_k %d, schema_version %q)", cfg.AbstainThreshold, cfg.TopK, cfg.SchemaVersion))
 }
 
 // FixDoctor automatically repairs recoverable repository health issues.

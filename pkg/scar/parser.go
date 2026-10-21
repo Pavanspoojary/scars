@@ -11,6 +11,11 @@ import (
 )
 
 // ParseFrontmatter parses markdown content with strict YAML frontmatter.
+//
+// Parsing is syntactic only. Lifecycle, review, and verification invariants are
+// enforced separately by ValidateInvariants so that records violating them remain
+// loadable and can be reported by 'git-scars check', 'lint', and 'doctor' instead
+// of being silently discarded during catalog reads.
 func ParseFrontmatter(data []byte) (*Scar, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	if !scanner.Scan() {
@@ -77,7 +82,7 @@ func ParseFrontmatter(data []byte) (*Scar, error) {
 		scar.Lesson = scar.Body
 	}
 
-	if err := scar.ValidateInvariants(); err != nil {
+	if err := scar.validateSchemaVersion(); err != nil {
 		return nil, err
 	}
 

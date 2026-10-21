@@ -167,10 +167,21 @@ func NewDraft(slug, title, lesson string, files []string) (*Scar, error) {
 	}, nil
 }
 
-// ValidateInvariants enforces the core lifecycle and verification invariant rules.
-func (s *Scar) ValidateInvariants() error {
+// validateSchemaVersion enforces compatibility between the on-disk schema and this build.
+// It is separated from ValidateInvariants because schema compatibility is a
+// prerequisite for loading a record, while the remaining rules describe the
+// semantic validity of a loaded record.
+func (s *Scar) validateSchemaVersion() error {
 	if s.SchemaVersion != CurrentSchemaVersion {
 		return fmt.Errorf("unsupported schema_version %q (current supported is %q). Upgrade git-scars to read this file", s.SchemaVersion, CurrentSchemaVersion)
+	}
+	return nil
+}
+
+// ValidateInvariants enforces the core lifecycle and verification invariant rules.
+func (s *Scar) ValidateInvariants() error {
+	if err := s.validateSchemaVersion(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(s.ID) == "" {
 		return errors.New("scar ID cannot be empty")

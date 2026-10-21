@@ -231,7 +231,7 @@ git-scars check
 ```
 **Stable Exit Codes**:
 - `0`: All Scars valid and current.
-- `1`: Invalid format or invariant violation.
+- `1`: Invalid format or invariant violation. Records that fail to parse or that break a lifecycle invariant are reported, never skipped.
 - `2`: Stale anchor detected (code modified since baseline, requires reaffirmation).
 - `3`: Operational error.
 

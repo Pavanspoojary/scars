@@ -227,6 +227,7 @@ func runAdd(store *scar.Store, args []string) error {
 	title := fs.String("title", "", "Descriptive failure title")
 	lesson := fs.String("lesson", "", "Concise prevention lesson")
 	filesStr := fs.String("files", "", "Comma-separated list of anchored files")
+	depsStr := fs.String("deps", "", "Comma-separated dependency anchors in name@version form")
 	interactive := fs.Bool("interactive", false, "Interactive prompt mode")
 	fs.BoolVar(interactive, "i", false, "Interactive prompt mode (shorthand)")
 
@@ -269,9 +270,31 @@ func runAdd(store *scar.Store, args []string) error {
 		}
 	}
 
+	var deps []scar.DependencyAnchor
+	if *depsStr != "" {
+		for _, d := range strings.Split(*depsStr, ",") {
+			d = strings.TrimSpace(d)
+			if d == "" {
+				continue
+			}
+			name, version, _ := strings.Cut(d, "@")
+			deps = append(deps, scar.DependencyAnchor{
+				Name:    strings.TrimSpace(name),
+				Version: strings.TrimSpace(version),
+			})
+		}
+	}
+
 	draft, path, err := store.CreateDraft(*title, *lesson, files)
 	if err != nil {
 		return fmt.Errorf("failed creating draft: %w", err)
+	}
+
+	if len(deps) > 0 {
+		draft.Anchors.Dependencies = deps
+		if _, err := store.SaveScar(draft); err != nil {
+			return fmt.Errorf("failed saving dependency anchors: %w", err)
+		}
 	}
 
 	fmt.Printf("Created draft scar: %s\nPath: %s\nStatus: %s (review: %s, verifier: %s)\n",

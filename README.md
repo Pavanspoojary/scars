@@ -550,6 +550,25 @@ GitScars automatically inspects repository dependency manifests and lockfiles to
 
 When dependencies are upgraded or downgraded, Scars anchored to vulnerable or breaking versions automatically trigger match signals during recall.
 
+Dependency anchors are authored with the `name@version` form:
+
+```bash
+git-scars add \
+  --title "Redis pipeline breaks on client upgrade" \
+  --lesson "Upgrade the redis client only after reviewing the pipeline change" \
+  --files "pkg/cache/redis.go" \
+  --deps "github.com/redis/go-redis/v9@9.5.1"
+```
+
+They are persisted in the scar frontmatter and re-read on every subsequent load, so the anchor survives verification, reaffirmation, and synchronization cycles:
+
+```yaml
+anchors:
+  dependencies:
+    - name: "github.com/redis/go-redis/v9"
+      version: "9.5.1"
+```
+
 ---
 
 ## CLI Command Reference
@@ -557,7 +576,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | Command | Arguments | Description |
 | :--- | :--- | :--- |
 | `init` | `[--agent <targets>, --ci <target>]` | Initialize `.gitscars/` repository, agent configs, and CI workflows (`--ci github`) |
-| `add` | `[-i], [--title, --lesson, --files]` | Create a new scar draft (interactive wizard or flags) |
+| `add` | `[-i], [--title, --lesson, --files, --deps]` | Create a new scar draft (interactive wizard or flags) |
 | `add from-commit` | `<sha>` | Automatically prefill a draft from a Git commit diff |
 | `list` | none | List recorded scars with lifecycle, review, and freshness |
 | `show` | `<id>` | Display full metadata, anchors, and body of a scar |

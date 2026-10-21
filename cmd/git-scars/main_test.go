@@ -38,6 +38,51 @@ func TestLintReportsUnloadableScar(t *testing.T) {
 	}
 }
 
+func TestAddWithDependencyAnchors(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-deps-test-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	err = run([]string{
+		"add",
+		"--title", "Redis client upgrade hazard",
+		"--lesson", "Upgrade the redis client only after reviewing the pipeline change",
+		"--files", "pkg/cache/redis.go",
+		"--deps", "github.com/redis/go-redis/v9@9.5.1",
+	})
+	if err != nil {
+		t.Fatalf("run add failed: %v", err)
+	}
+
+	store := scar.NewStore(tmpDir)
+	scars, err := store.ListScars()
+	if err != nil {
+		t.Fatalf("list scars failed: %v", err)
+	}
+	if len(scars) != 1 {
+		t.Fatalf("expected 1 scar, found %d", len(scars))
+	}
+	deps := scars[0].Scar.Anchors.Dependencies
+	if len(deps) != 1 {
+		t.Fatalf("expected 1 dependency anchor, got %d", len(deps))
+	}
+	if deps[0].Name != "github.com/redis/go-redis/v9" || deps[0].Version != "9.5.1" {
+		t.Errorf("unexpected dependency anchor: %+v", deps[0])
+	}
+}
+
 func TestCLIWorkflow(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-cli-test-*")
 	if err != nil {

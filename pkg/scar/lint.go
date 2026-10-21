@@ -139,7 +139,7 @@ func lintAnchorSemantics(repoRoot string, s *Scar) []LintFinding {
 			if !symbolResolves(repoRoot, s.Anchors.Files, sym) {
 				findings = append(findings, LintFinding{
 					ScarID:   s.ID,
-					Severity: "WARNING",
+					Severity: "ERROR",
 					Rule:     "anchor_symbol_missing",
 					Message:  fmt.Sprintf("anchored symbol %q was not found in any anchored file", sym),
 				})
@@ -198,12 +198,22 @@ func symbolVerifiable(anchorFiles []string) bool {
 }
 
 // symbolResolves reports whether a symbol is declared in any of the anchored files.
+// A name that appears in the file text but is not a declaration is accepted, so
+// that anchors to variables and fields are not reported as missing.
 func symbolResolves(repoRoot string, anchorFiles []string, symbol string) bool {
 	for _, rel := range anchorFiles {
 		if !IsSupportedSymbolFile(rel) {
 			continue
 		}
-		if _, err := ExtractSymbolHash(filepath.Join(repoRoot, rel), symbol); err == nil {
+		full := filepath.Join(repoRoot, rel)
+		if _, err := ExtractSymbolHash(full, symbol); err == nil {
+			return true
+		}
+		data, err := os.ReadFile(full)
+		if err != nil {
+			continue
+		}
+		if strings.Contains(string(data), symbol) {
 			return true
 		}
 	}

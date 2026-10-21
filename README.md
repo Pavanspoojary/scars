@@ -441,10 +441,12 @@ A guardrail is only useful while its anchors still describe the code it protects
 
 | Rule | Severity | Meaning |
 | :--- | :--- | :--- |
-| `anchor_symbol_missing` | `WARNING` | The anchored symbol no longer exists in any anchored file. |
+| `anchor_symbol_missing` | `ERROR` | The anchored symbol no longer exists in any anchored file. |
 | `bad_pattern_present` | `ERROR` | The recorded footgun is still present in the anchored code. |
 | `good_pattern_absent` | `WARNING` | The recorded fix cannot be found, so the anchor likely no longer covers the fixed code. |
 | `missing_severity` | `WARNING` | An active guardrail does not declare a severity, so it cannot be compared against a blocking threshold. |
+
+A symbol anchor is satisfied by a declaration or by any occurrence of the name in the anchored file, so anchors to variables and fields are accepted.
 
 `bad_pattern` and `good_pattern` must be **literal snippets of code**, so that presence and absence can be checked deterministically:
 

@@ -69,3 +69,33 @@ func TestEnforceBlocked(t *testing.T) {
 		t.Errorf("expected unrelated file to not be blocked on critical")
 	}
 }
+
+func TestEnforceTreatsUndeclaredSeverityAsHigh(t *testing.T) {
+	tmpDir := t.TempDir()
+	store := NewStore(tmpDir)
+	_ = store.Init()
+
+	anchor := filepath.Join(tmpDir, "pkg", "worker.go")
+	_ = os.MkdirAll(filepath.Dir(anchor), 0755)
+	_ = os.WriteFile(anchor, []byte("package worker\n"), 0644)
+
+	s, _, _ := store.CreateDraft("Undeclared Severity", "Buffer worker channel", []string{"pkg/worker.go"})
+	s.Lifecycle.State = LifecycleActive
+	s.Review.Status = ReviewApproved
+	s.Verifier = failToPassVerifier("go", "test", "-race", "./...")
+	// A hand-authored record that omits the severity field entirely.
+	s.Severity = ""
+	_ = store.RecordBaseline(s, s.Verifier.CommandHash)
+	_, _ = store.SaveScar(s)
+
+	res, err := store.Enforce(EnforceOptions{Files: []string{"pkg/worker.go"}, FailOn: SeverityHigh})
+	if err != nil {
+		t.Fatalf("enforce failed: %v", err)
+	}
+	if !res.Blocked {
+		t.Fatalf("expected an undeclared severity to block at the high threshold, got %+v", res)
+	}
+	if res.HighestSeverity != SeverityHigh {
+		t.Errorf("expected highest severity to report high, got %q", res.HighestSeverity)
+	}
+}

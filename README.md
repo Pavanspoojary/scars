@@ -545,6 +545,8 @@ Exit Codes:
 - `0`: Clean (no blocking guardrails detected).
 - `2`: Blocked (blocking guardrail detected; outputs actionable `<dont>`, `<do>`, and verification instructions to stderr).
 
+A guardrail that does not declare a severity is treated as `high`, so an uncalibrated guardrail is never silently downgraded below the blocking threshold.
+
 Machine JSON Output:
 ```bash
 git-scars enforce --files "pkg/worker.go" --json

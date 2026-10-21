@@ -52,7 +52,7 @@ func InspectCommit(repoRoot, sha string) (*GitCommitInfo, error) {
 	parentSHA := strings.TrimSpace(string(parentBuf))
 
 	// Get changed files
-	cmd = exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", fullSHA)
+	cmd = exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "--root", "-r", fullSHA)
 	cmd.Dir = repoRoot
 	diffOut, err := cmd.Output()
 	if err != nil {

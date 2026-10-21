@@ -160,7 +160,11 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 		confidence := 2
 		var reasons []string
 
-		if issueRefRegex.MatchString(subject) {
+		// An issue reference counts whether it appears in the subject or in
+		// the body, since many repositories cite the tracked issue only in
+		// the commit body.
+		body := commitBody(s.RepoRoot, sha)
+		if issueRefRegex.MatchString(subject) || issueRefRegex.MatchString(body) {
 			confidence += 3
 			reasons = append(reasons, "issue_ref(+3)")
 		}
@@ -168,7 +172,10 @@ func (s *Store) HarvestCommits(opts HarvestOptions) (*HarvestResult, error) {
 			confidence += 3
 			reasons = append(reasons, "test_colocated(+3)")
 		}
-		if len(diffFiles) <= 3 {
+		// The scope signal is the same cap the noise filter above applies.
+		// A commit that already passed the cap is focused by construction,
+		// so co-located tests alone reach the review bar.
+		if len(diffFiles) <= maxFiles {
 			confidence += 2
 			reasons = append(reasons, "focused_diff(+2)")
 		}
@@ -275,7 +282,7 @@ func isFixCommit(subject string, customPatterns []string) bool {
 }
 
 func getCommitFiles(repoRoot, sha string) ([]string, error) {
-	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "-r", sha)
+	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "--name-only", "--root", "-r", sha)
 	cmd.Dir = repoRoot
 	out, err := cmd.Output()
 	if err != nil {
@@ -301,6 +308,19 @@ func isSourceFile(f string) bool {
 	default:
 		return false
 	}
+}
+
+// commitBody returns the commit message beyond the subject line, so that an
+// issue reference cited only in the body is still counted. An empty string is
+// returned when the message is empty or the commit cannot be read.
+func commitBody(repoRoot, sha string) string {
+	cmd := exec.Command("git", "show", "-s", "--format=%b", sha)
+	cmd.Dir = repoRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // parentCommit resolves the first parent of a commit, or an empty string when

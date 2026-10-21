@@ -3,6 +3,7 @@ package scar
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,4 +122,143 @@ func TestRecallHonoursConfiguredThresholds(t *testing.T) {
 	if len(candidates) != 1 {
 		t.Fatalf("expected the configured threshold of 3 to retrieve the scar, got %d results", len(candidates))
 	}
+}
+
+func findIssue(issues []ConfigIssue, key string) (ConfigIssue, bool) {
+	for _, issue := range issues {
+		if issue.Key == key {
+			return issue, true
+		}
+	}
+	return ConfigIssue{}, false
+}
+
+// TestLoadConfigReportsUnrecognizedKeys verifies that a misspelled key is
+// reported instead of being dropped without comment.
+func TestLoadConfigReportsUnrecognizedKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "schema_version: \"1\"\nabstain_treshold: 5\n")
+
+	store := NewStore(dir)
+	cfg, issues := store.LoadConfigWithIssues()
+	if cfg.AbstainThreshold != 3 {
+		t.Errorf("expected the default abstain threshold for an unrecognized key, got %d", cfg.AbstainThreshold)
+	}
+	issue, ok := findIssue(issues, "abstain_treshold")
+	if !ok {
+		t.Fatalf("expected an issue for the unrecognized key, got %+v", issues)
+	}
+	if !strings.Contains(issue.Reason, "line 2") {
+		t.Errorf("expected the diagnostic to point at line 2, got %q", issue.Reason)
+	}
+}
+
+// TestLoadConfigIgnoresAFileThatDeclaresAnUnsupportedVersion verifies that a
+// configuration written for a newer reader contract is set aside whole rather
+// than partially applied.
+func TestLoadConfigIgnoresAFileThatDeclaresAnUnsupportedVersion(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "schema_version: \"2\"\nabstain_threshold: 5\n")
+
+	store := NewStore(dir)
+	cfg, issues := store.LoadConfigWithIssues()
+	if cfg.AbstainThreshold != 3 {
+		t.Errorf("expected the whole file to be ignored, got threshold %d", cfg.AbstainThreshold)
+	}
+	issue, ok := findIssue(issues, "schema_version")
+	if !ok {
+		t.Fatalf("expected an issue for the declared version, got %+v", issues)
+	}
+	if !strings.Contains(issue.Reason, "ignored entirely") {
+		t.Errorf("expected the diagnostic to state the file was ignored, got %q", issue.Reason)
+	}
+}
+
+// TestLoadConfigReportsDuplicateKeys verifies that a repeated key reports
+// every position while the last appearance stays in force.
+func TestLoadConfigReportsDuplicateKeys(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "abstain_threshold: 5\nabstain_threshold: 4\n")
+
+	store := NewStore(dir)
+	cfg, issues := store.LoadConfigWithIssues()
+	if cfg.AbstainThreshold != 4 {
+		t.Errorf("expected the last appearance to be in force, got %d", cfg.AbstainThreshold)
+	}
+	issue, ok := findIssue(issues, "abstain_threshold")
+	if !ok {
+		t.Fatalf("expected an issue for the repeated key, got %+v", issues)
+	}
+	if !strings.Contains(issue.Reason, "line(s) 1, 2") {
+		t.Errorf("expected the diagnostic to list both lines, got %q", issue.Reason)
+	}
+}
+
+// TestLoadConfigAcceptsInlineComments verifies that a trailing comment does
+// not render an otherwise valid value unusable.
+func TestLoadConfigAcceptsInlineComments(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "abstain_threshold: 5 # keep 5 for the benchmark\n")
+
+	store := NewStore(dir)
+	cfg, issues := store.LoadConfigWithIssues()
+	if cfg.AbstainThreshold != 5 {
+		t.Errorf("expected a value followed by a comment to be honoured, got %d", cfg.AbstainThreshold)
+	}
+	if len(issues) != 0 {
+		t.Errorf("expected no issues, got %+v", issues)
+	}
+}
+
+// TestLoadConfigReportsUnusableValues documents that an unusable value stays
+// usable-in-error: the defaults apply and the mistake is reported.
+func TestLoadConfigReportsUnusableValues(t *testing.T) {
+	dir := t.TempDir()
+	writeConfig(t, dir, "abstain_threshold: not-a-number\ntop_k: 0\n")
+
+	store := NewStore(dir)
+	cfg, issues := store.LoadConfigWithIssues()
+	if cfg.AbstainThreshold != 3 || cfg.TopK != 3 {
+		t.Errorf("expected defaults for unusable values, got %+v", cfg)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("expected an issue per unusable value, got %+v", issues)
+	}
+}
+
+// TestDoctorReportsConfigurationIssues verifies that the configuration probe
+// surfaces an unusable entry and that a missing file is quiet.
+func TestDoctorReportsConfigurationIssues(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0755); err != nil {
+		t.Fatalf("failed creating .git: %v", err)
+	}
+	store := NewStore(dir)
+	if err := store.Init(); err != nil {
+		t.Fatalf("failed initializing store: %v", err)
+	}
+
+	report := store.RunDoctor()
+	var probe *DoctorCheck
+	for i := range report.Checks {
+		if report.Checks[i].Name == "Configuration" {
+			probe = &report.Checks[i]
+			break
+		}
+	}
+	if probe == nil {
+		t.Fatal("expected a Configuration check in the report")
+	}
+	if probe.Status != "OK" {
+		t.Errorf("expected a missing configuration file to be quiet, got %s: %s", probe.Status, probe.Message)
+	}
+
+	writeConfig(t, dir, "abstain_treshold: 5\n")
+	report = store.RunDoctor()
+	for _, c := range report.Checks {
+		if c.Name == "Configuration" && c.Status == "WARN" {
+			return
+		}
+	}
+	t.Errorf("expected a Configuration warning for the unrecognized key, got %+v", report.Checks)
 }

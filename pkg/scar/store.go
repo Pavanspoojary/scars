@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Store manages loading, creating, and updating Scar records on disk.
@@ -402,6 +403,8 @@ func (s *Store) RecordBaseline(scar *Scar, commandHash string) error {
 	if scar.Baseline.AnchorHashes == nil {
 		scar.Baseline.AnchorHashes = make(map[string]string)
 	}
+
+	scar.Baseline.RecordedAt = time.Now().UTC().Format(time.RFC3339)
 
 	for _, f := range scar.Anchors.Files {
 		fullPath := filepath.Join(s.RepoRoot, f)

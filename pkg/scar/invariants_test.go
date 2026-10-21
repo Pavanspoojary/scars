@@ -208,13 +208,16 @@ func TestStoreOperationsWithoutGit(t *testing.T) {
 		t.Errorf("expected unbaselined scar freshness to be unavailable, got %s", scars[0].Freshness)
 	}
 
-	// Create dummy anchor file and record baseline
+	// Record baseline
 	anchorPath := filepath.Join(tmpDir, "worker.go")
 	if err := os.WriteFile(anchorPath, []byte("package main\n"), 0644); err != nil {
 		t.Fatalf("failed writing anchor file: %v", err)
 	}
 	if err := store.RecordBaseline(draft, "cmd-hash-123"); err != nil {
 		t.Fatalf("failed recording baseline: %v", err)
+	}
+	if draft.Baseline.RecordedAt == "" {
+		t.Error("expected baseline to record the time it was captured")
 	}
 	if _, err := store.SaveScar(draft); err != nil {
 		t.Fatalf("failed saving scar: %v", err)

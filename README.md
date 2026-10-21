@@ -348,6 +348,8 @@ git-scars heal -- go test -race ./...
 git-scars heal --json -- npm test
 ```
 
+The observed command's own exit code is reported in the heal output. `git-scars heal` itself exits `4` when the observed command failed and `0` when it succeeded, so that the failure of the observed command is never confused with an operational error of `git-scars` itself.
+
 ### 19. CI/CD & GitHub Code Scanning SARIF (`git-scars check --format sarif`)
 Integrate GitScars directly into pull request checks and security dashboards using the OASIS SARIF 2.1.0 standard:
 ```bash
@@ -645,7 +647,7 @@ anchors:
 | `dedupe` | `[--min <sim>, --dry-run, --json]` | Detect duplicate and near-duplicate scars (token Jaccard similarity) |
 | `harvest` | `[--max <n>, --since <ref>, --dry-run, --json]` | Automatically mine bug-fixing commits from Git history into scar drafts |
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
-| `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
+| `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions (exit `4` when the observed command failed) |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
 | `lint` | none | Security, schema, and anchor-semantics audit (checks traversal, injections, unloadable files, anchor drift, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |

@@ -16,6 +16,12 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
+// HealCommandFailedExitCode is returned by 'git-scars heal' when the observed
+// command failed. The observed command's own exit code is reported in the
+// heal output, but it is not reused as the exit code of git-scars, because
+// exit code 1 already means an operational error of git-scars itself.
+const HealCommandFailedExitCode = 4
+
 func main() {
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1469,7 +1475,7 @@ func runHeal(store *scar.Store, args []string) error {
 		}
 		fmt.Println(string(data))
 		if !report.Success {
-			os.Exit(report.ExitCode)
+			os.Exit(HealCommandFailedExitCode)
 		}
 		return nil
 	}
@@ -1517,7 +1523,7 @@ func runHeal(store *scar.Store, args []string) error {
 		fmt.Fprintf(os.Stderr, "Suggested Verification: %s\n", report.SuggestedCommand)
 	}
 
-	os.Exit(report.ExitCode)
+	os.Exit(HealCommandFailedExitCode)
 	return nil
 }
 

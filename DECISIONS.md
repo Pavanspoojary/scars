@@ -366,3 +366,30 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - A quoted pattern containing a pointer dereference no longer makes a record unloadable.
   - The stricter lint severity and the blocking continuous integration step may fail pipelines that previously passed, which is a breaking change for a repository that relied on either being permissive.
 
+
+---
+
+## ADR-0020: Reachable Mining, Visible Configuration, a Complete Agent Surface, and Executable Evaluation Machinery
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - The harvest confidence model granted the focus bonus only when a commit touched at most three files, while the mining filter itself accepts at most `--max-files`. A four or five file fix with co-located tests scored five and was rejected, and three of the most valuable defects in this repository's history were unreachable for exactly that reason.
+  - An issue reference cited only in the commit body was not counted, although many repositories cite the tracked issue only there.
+  - A root commit was invisible to the diff walker, because `diff-tree` without `--root` reports no changes for the first commit.
+  - A configuration entry that could not be interpreted was dropped without comment, so a misspelled key such as `abstain_treshold` silently took the documented default and a repository that believed its retrieval was tuned had no way of discovering otherwise.
+  - The agent-facing surface exposed only part of what retrieval and triage understood: recall accepted no command anchors and used hardcoded limits instead of the repository configuration, triage could not be narrowed to files, injection exposed no symbols or task terms, planning exposed neither commands nor an error signature, and a draft could not be given symbol anchors or a calibrated severity. `get_scar` did not surface the severity that planning and enforcement decisions depend on.
+  - The preregistered agent success protocol existed only as formulas in a document. Nothing could read a recorded corpus, compute the statistic, or state the sample size, so any agent-level number would have been assembled by hand and therefore unreproducible.
+- **Decision**:
+  - The focus signal mirrors the mining cap: a commit that already passed the `--max-files` filter is focused by construction, so a capped fix with co-located tests reaches the review bar without an external issue reference, while an untested or uncapped commit still needs one. The sample size discipline is unchanged: the default review bar stays at 7.
+  - An issue reference is counted when it appears in the subject or in the body.
+  - The diff walker passes `--root`, so a fix recorded in the root commit is minable.
+  - The reader reports every present-but-unusable entry through `doctor`, never blocks retrieval on a mistake, and sets aside a file that declares an unsupported schema version whole rather than partially applying it. Aliases such as mapping `threshold` to `abstain_threshold` were rejected: silently reinterpreting a key is worse than naming it. An absent `schema_version` is accepted without warning so a hand written file does not produce permanent doctor noise.
+  - The agent-facing surface declares and honours the full argument set, and `recall_scars` defers its limits to the repository configuration exactly as the command line does. `plan_task` keeps a deliberate recall threshold of 2, because planning surfaces candidates for consideration before work begins and does not block. Injection stays deliberately more sensitive than recall, so a task term overlap alone is enough there and task-only injection is documented behaviour rather than a defect.
+  - The evaluation machinery computes the paired one-sided non-inferiority test from recorded outcomes only, using the paired construction of Newcombe with the preregistered margin and quantiles, and labels any corpus below the required 928 paired evaluations a pilot study. The commands never simulate arms, so an executed protocol and a planned one remain distinguishable.
+- **Consequences**:
+  - Three additional historical fixes in this repository become reachable by the miner, including the parse and invariant separation defect; the coarse scope signal now rewards exactly what the filter accepts.
+  - A repository that misreads its own configuration learns of it in the first doctor run instead of never.
+  - An agent can exploit the same anchoring richness through MCP that the command line offers, and a configured threshold governs both surfaces.
+  - The agent success and authoring protocols are executable on recorded outcomes, while both measurements themselves remain Not Measured in this repository until an external harness and a human panel record data.
+  - A root commit fix is now minable; the historical commits of this repository contain none, so the catalogue is unaffected by that part of the change.

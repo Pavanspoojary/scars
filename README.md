@@ -313,7 +313,7 @@ git-scars dedupe --min 0.75 --json
 Bootstrap repository memory by walking Git history to identify past bug-fixing commits and generating draft scars with built-in quality filtering to eliminate draft noise:
 - **Diff-Size Cap (`--max-files 5`)**: Automatically ignores commits touching `> 5` files to avoid noisy reformatting, mass migrations, and large multi-package refactors.
 - **Co-Located Test Requirement**: Skips commits without co-located test updates by default to guarantee verified test behavior (override with `--allow-untested`).
-- **Confidence Scoring (`--min-confidence 7`)**: Computes a 1-10 quality confidence score based on message clarity, test co-location, and scope; drafts scoring below 7 are rejected to prevent human review fatigue.
+- **Confidence Scoring (`--min-confidence 7`)**: Computes a 1-10 quality confidence score; drafts scoring below 7 are rejected to prevent human review fatigue. The score is a base of 2, plus 3 for an issue reference cited in the subject or body, plus 3 for a co-located regression test, plus 2 when the diff is within the `--max-files` cap the harvest filter itself applies — so a capped fix with co-located tests reaches the review bar without an external issue reference, while an uncapped or untested commit needs the reference.
 
 Each mined draft records the fix commit and its first parent, so the draft can be verified as a genuine fail-to-pass regression rather than an exception.
 
@@ -477,9 +477,11 @@ top_k: 3
 | `abstain_threshold` | Minimum score a candidate must reach to be retrieved. Below it, GitScars abstains. |
 | `top_k` | Maximum number of scars returned by a single recall. |
 
-`git-scars recall --threshold` and `--top-k` override the configured values for one invocation. A value of `0` means "use the configured value". A missing, unreadable, or malformed configuration file falls back to the defaults, and an individual value that cannot be interpreted is ignored, so a configuration mistake never blocks retrieval.
+`git-scars recall --threshold` and `--top-k` override the configured values for one invocation. A value of `0` means "use the configured value". The MCP `recall_scars` tool defers its limits to this file the same way. A missing, unreadable, or malformed configuration file falls back to the defaults, and an individual value that cannot be interpreted is ignored, so a configuration mistake never blocks retrieval; the mistake itself is reported by `git-scars doctor`.
 
-Injection, triage, and enforcement deliberately use a more sensitive threshold than the abstain threshold, because a guardrail that is worth injecting is worth surfacing before it reaches the abstain threshold.
+`git-scars doctor` carries a Configuration probe that names every entry of the file that was present but could not be used — a key outside the recognized set (a misspelling such as `abstain_treshold`), a value that is not a positive integer, a repeated key, or a declared `schema_version` the reader does not understand. A file that declares an unsupported schema version is set aside whole rather than partially applied, because the keys of a newer contract may carry different meanings. The reader strips an unquoted trailing comment and one layer of quotes, so `top_k: 5 # note` is honoured.
+
+Injection, triage, and enforcement deliberately use a more sensitive threshold than the abstain threshold, because a guardrail that is worth injecting is worth surfacing before it reaches the abstain threshold. `plan_task` plans with recall at a threshold of 2 for the same reason: planning surfaces candidates for consideration before work begins, it does not block.
 
 ---
 
@@ -499,15 +501,15 @@ The MCP server exposes rich two-way tools and resources for AI coding agents:
 
 #### Standard Tools:
 - `list_scars`: List all repository scars with their lifecycle and dynamic freshness status.
-- `get_scar`: Retrieve full frontmatter, anchors, verifier results, and markdown body by scar ID.
-- `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, and commands.
-- `inject_guardrails`: Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files.
-- `triage_error`: Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars.
-- `draft_scar`: Autonomously record a new failure memory draft into repository Git memory.
+- `get_scar`: Retrieve full frontmatter, anchors, severity, verifier results, and markdown body by scar ID.
+- `recall_scars`: Deterministically retrieve matching scars for target files, symbols, error messages, commands, and task descriptions. Its limits defer to the repository configuration.
+- `inject_guardrails`: Generate an ultra-compact, token-budget-capped prompt guardrail block for specific files, symbols, and task terms.
+- `triage_error`: Diagnose raw compiler errors, panic stack traces, or test outputs against recorded scars, optionally narrowed to known files.
+- `draft_scar`: Autonomously record a new failure memory draft into repository Git memory, including symbol anchors and a calibrated severity.
 
 #### Composite Tools (Single-Roundtrip Workflow):
 - `pre_edit_check`: Pre-edit blocking guardrail check. Inspects target files and symbols before file modifications and returns blocking scars with actionable do/don't patterns and verification commands.
-- `plan_task`: Combines selective recall and token-budget prompt injection into a single roundtrip for task planning.
+- `plan_task`: Combines selective recall (files, symbols, commands, an error signature, and task terms) and token-budget prompt injection into a single roundtrip for task planning. Planning recall is deliberately more sensitive than enforcement so candidates surface before work begins.
 - `post_failure_learn`: Multi-language failure triage and diagnostic learning in a single roundtrip, returning prevention lessons for test errors or stack traces.
 
 #### Resources:
@@ -664,6 +666,8 @@ anchors:
 | `lint` | none | Security, schema, and anchor-semantics audit (checks traversal, injections, unloadable files, anchor drift, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
+| `eval-agents` | `--report <file>` | Analyse a recorded multi-agent corpus under the preregistered non-inferiority protocol (EVAL_PLAN 5.2) |
+| `eval-authoring` | `--log <file>` | Summarise a human authoring log against the five minute median target (EVAL_PLAN 5.1) |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |
 | `hook` | `install`, `status`, `uninstall` | Manage Git pre-commit hook guardrail |
 | `mcp` | none | Run stdio Model Context Protocol (MCP) server |

@@ -3,6 +3,7 @@ package scar
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -74,6 +75,23 @@ type SARIFRegion struct {
 	StartLine int `json:"startLine"`
 }
 
+// sortedRules returns the rules in a stable order so that repeated SARIF
+// reports of the same findings are byte-identical. Iterating a map directly
+// produces a different ordering on every run.
+func sortedRules(rulesMap map[string]SARIFRule) []SARIFRule {
+	ids := make([]string, 0, len(rulesMap))
+	for id := range rulesMap {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	rules := make([]SARIFRule, 0, len(ids))
+	for _, id := range ids {
+		rules = append(rules, rulesMap[id])
+	}
+	return rules
+}
+
 // FormatEnforceSARIF formats pre-edit enforcement check results into SARIF 2.1.0 JSON.
 func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 	rulesMap := make(map[string]SARIFRule)
@@ -139,10 +157,7 @@ func FormatEnforceSARIF(res *EnforceResult) ([]byte, error) {
 		}
 	}
 
-	var rules []SARIFRule
-	for _, r := range rulesMap {
-		rules = append(rules, r)
-	}
+	rules := sortedRules(rulesMap)
 
 	report := SARIFReport{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",
@@ -233,10 +248,7 @@ func FormatCheckSARIF(scars []ScarSummary, invariantErrors []string) ([]byte, er
 		})
 	}
 
-	var rules []SARIFRule
-	for _, r := range rulesMap {
-		rules = append(rules, r)
-	}
+	rules := sortedRules(rulesMap)
 
 	report := SARIFReport{
 		Schema:  "https://json.schemastore.org/sarif-2.1.0.json",

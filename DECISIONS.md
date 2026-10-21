@@ -274,3 +274,31 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - A dependency upgrade now surfaces the scars anchored to the previous version, as the README describes.
   - The parser remains a hand-written state machine with no third-party dependency, consistent with the zero-dependency constraint.
 
+---
+
+## ADR-0017: Anchor Semantics, Evidence Binding, and Fail-Closed Retrieval
+
+- **Date**: 2026-10-21
+- **Status**: Accepted
+- **Context**:
+  - Anchor correctness was trusted rather than checked. A guardrail could point at a file or symbol that no longer existed, or at a file unrelated to the failure it described, and nothing would report it.
+  - The repository's own seed scar was an instance of this. It was anchored to `cmd/git-scars/main.go` and the symbol `run`, neither of which contains a channel or a goroutine. The worker pool it describes lives in `pkg/scar/store.go`. Recall for the file containing the worker pool returned zero scars, and enforcement never blocked, so the guardrail protected nothing.
+  - The verifier command hash was recorded but never compared against the argv it described. An active scar could claim fail-to-pass verification with a fabricated hash.
+  - `Recall` returned any active scar with current anchors, without validating it. A record that failed an invariant could still be injected into an agent prompt.
+  - An active scar without a severity was scored as medium by enforcement, so it could never reach the default high blocking threshold.
+  - `RecordBaseline` merged new anchor hashes into the existing map. A re-anchored scar stayed coupled to the file it no longer referenced.
+- **Decision**:
+  - Lint verifies anchor semantics: anchored symbols must resolve, the recorded bad pattern must be absent from the anchored code, the recorded good pattern must be present, and an active guardrail must declare a severity.
+  - Patterns must be literal snippets of code so that presence and absence are deterministic.
+  - An active scar claiming fail-to-pass verification must record a command hash derived from its own argv, working directory, and environment allowlist.
+  - `Recall` refuses to return a scar that violates an invariant. Retrieval fails closed.
+  - Enforcement treats an undeclared severity as high.
+  - `RecordBaseline` replaces the recorded anchor and symbol sets rather than merging into them.
+  - The seed scar is re-anchored to the implementation it describes and is given a severity, a fix hint, and literal patterns.
+- **Consequences**:
+  - The seed guardrail now fires: recall for `pkg/scar/store.go` returns it, and enforcement blocks pre-edit with actionable do and do-not instructions.
+  - Verification evidence is bound to the command it proves. A record whose evidence cannot be reproduced from its own metadata is rejected rather than trusted.
+  - Invalid guardrails are excluded from retrieval instead of being injected into agent prompts.
+  - Anchor drift that previously passed silently is now reported by `check`, `lint`, and `doctor`.
+  - The stricter invariant rejects records that were previously accepted, which is a breaking change for any repository holding active scars whose recorded hash does not match their argv. The release is therefore versioned as a major increment.
+

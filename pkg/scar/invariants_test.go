@@ -215,6 +215,30 @@ func TestActiveScarVerifierCommandHashMustMatchArgv(t *testing.T) {
 	}
 }
 
+func TestAcceptQuotedPointerSyntaxInValues(t *testing.T) {
+	doc := []byte(`---
+schema_version: "1"
+id: "pointer-pattern"
+title: "Pointer pattern"
+lesson: "Lesson"
+bad_pattern: "store.VerifyFailToPass(ctx, s, nil, *interactive)"
+lifecycle:
+  state: "draft"
+review:
+  status: "unreviewed"
+verifier:
+  result: "not_attempted"
+---
+`)
+	scar, err := ParseFrontmatter(doc)
+	if err != nil {
+		t.Fatalf("expected a quoted pointer expression to be accepted, got: %v", err)
+	}
+	if scar.BadPattern != "store.VerifyFailToPass(ctx, s, nil, *interactive)" {
+		t.Errorf("unexpected bad pattern: %q", scar.BadPattern)
+	}
+}
+
 func TestStoreOperationsWithoutGit(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-store-test-*")
 	if err != nil {

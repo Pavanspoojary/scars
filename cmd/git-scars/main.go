@@ -703,13 +703,22 @@ func runCheck(store *scar.Store, args []string) error {
 }
 
 func runLint(store *scar.Store, args []string) error {
-	scars, err := store.ListScars()
+	scars, failures, err := store.ListScarsDetailed()
 	if err != nil {
 		return fmt.Errorf("failed reading scars: %w", err)
 	}
 
 	var allScars []*scar.Scar
 	var allFindings []scar.LintFinding
+
+	for _, f := range failures {
+		allFindings = append(allFindings, scar.LintFinding{
+			ScarID:   f.ID,
+			Severity: "ERROR",
+			Rule:     "unloadable_scar",
+			Message:  fmt.Sprintf("scar file could not be loaded: %s", f.Error),
+		})
+	}
 
 	for _, summary := range scars {
 		s := summary.Scar
@@ -735,13 +744,14 @@ func runLint(store *scar.Store, args []string) error {
 		}
 	}
 
+	audited := len(scars) + len(failures)
 	if len(allFindings) == 0 {
-		fmt.Printf("Lint clean: %d scars audited with zero findings.\n", len(allScars))
+		fmt.Printf("Lint clean: %d scar file(s) audited with zero findings.\n", audited)
 		return nil
 	}
 
 	hasError := false
-	fmt.Printf("Lint findings for %d scars:\n", len(allScars))
+	fmt.Printf("Lint findings across %d scar file(s):\n", audited)
 	for _, f := range allFindings {
 		if f.Severity == "ERROR" {
 			hasError = true

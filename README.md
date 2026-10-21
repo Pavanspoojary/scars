@@ -271,7 +271,7 @@ git-scars stats --json
 ```
 
 ### 13. Run Full Diagnostics & Automated Repair
-Audit Git worktree health, schema validity, invariants, anchor drift, and hook readiness:
+Audit Git worktree health, scar file loadability, schema validity, invariants, anchor drift, and hook readiness:
 ```bash
 # Interactive diagnostic checklist
 git-scars doctor
@@ -578,7 +578,7 @@ When dependencies are upgraded or downgraded, Scars anchored to vulnerable or br
 | `bundle` | `export [options], import <file> [options]` | Export and import portable, verified memory bundles (`gitscars.bundle.v1`) |
 | `heal` | `[--json] -- <command...>` | Run test command, intercept failures, and automatically triage regressions |
 | `check` | `[--diff <ref>, --format sarif]` | Read-only verification of scar freshness and invariants (`--format sarif`) |
-| `lint` | none | Security and schema audit (checks traversal, injections, noisy scars) |
+| `lint` | none | Security and schema audit (checks traversal, injections, unloadable files, noisy scars) |
 | `doctor` | `[--json, --fix]` | Run repository diagnostics and automatically repair caches/hooks |
 | `stats` | `[--json]` | Display repository metrics, monitored anchors, and feedback stats |
 | `index` | none | Rebuild `.gitscars/.local/index.json` fast cache |

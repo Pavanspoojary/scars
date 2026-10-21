@@ -10,6 +10,34 @@ import (
 	"github.com/Pavanspoojary/scars/pkg/scar"
 )
 
+func TestLintReportsUnloadableScar(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "gitscars-lint-test-*")
+	if err != nil {
+		t.Fatalf("failed creating temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	origWd, _ := os.Getwd()
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed chdir: %v", err)
+	}
+	defer os.Chdir(origWd)
+
+	if err := run([]string{"init"}); err != nil {
+		t.Fatalf("run init failed: %v", err)
+	}
+
+	malformed := filepath.Join(tmpDir, ".gitscars", "scars", "malformed.md")
+	doc := "---\nschema_version: \"1\"\nid: \"malformed\"\ntitle: \"Unterminated frontmatter\n"
+	if err := os.WriteFile(malformed, []byte(doc), 0644); err != nil {
+		t.Fatalf("failed writing malformed scar: %v", err)
+	}
+
+	if err := run([]string{"lint"}); err == nil {
+		t.Fatal("expected lint to fail on a scar file that cannot be loaded")
+	}
+}
+
 func TestCLIWorkflow(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "gitscars-cli-test-*")
 	if err != nil {

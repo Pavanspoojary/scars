@@ -21,14 +21,20 @@ type CheckResult struct {
 // RunReadOnlyCheck performs a strictly read-only validation of scars in the repo.
 // Invariant: This function NEVER writes, mutates files, or executes verifiers.
 func (s *Store) RunReadOnlyCheck(diffRef string) (*CheckResult, error) {
-	summaries, err := s.ListScars()
+	summaries, failures, err := s.ListScarsDetailed()
 	if err != nil {
 		return &CheckResult{ExitCode: 3}, fmt.Errorf("operational error reading scars: %w", err)
 	}
 
 	res := &CheckResult{
-		TotalScars: len(summaries),
+		TotalScars: len(summaries) + len(failures),
 		ExitCode:   0,
+	}
+
+	// 0. Scar files that could not be loaded are reported, never skipped.
+	for _, f := range failures {
+		res.InvalidScars = append(res.InvalidScars, fmt.Sprintf("%s: failed to load: %s", f.ID, f.Error))
+		res.ExitCode = 1
 	}
 
 	var scarPtrs []*Scar

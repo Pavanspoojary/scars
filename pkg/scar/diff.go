@@ -20,7 +20,7 @@ func (s *Store) DiffScarAnchors(scar *Scar) ([]AnchorDiffResult, error) {
 
 	for _, relPath := range scar.Anchors.Files {
 		fullPath := filepath.Join(s.RepoRoot, relPath)
-		currentHash, err := hashFile(fullPath)
+		currentHash, err := s.cachedHashFile(fullPath)
 		if err != nil {
 			results = append(results, AnchorDiffResult{
 				FilePath: relPath,

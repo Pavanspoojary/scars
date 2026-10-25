@@ -393,3 +393,30 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - An agent can exploit the same anchoring richness through MCP that the command line offers, and a configured threshold governs both surfaces.
   - The agent success and authoring protocols are executable on recorded outcomes, while both measurements themselves remain Not Measured in this repository until an external harness and a human panel record data.
   - A root commit fix is now minable; the historical commits of this repository contain none, so the catalogue is unaffected by that part of the change.
+
+---
+
+## ADR-0021: A Stamp-Keyed Process Cache on the Retrieval Hot Path
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**:
+  - Benchmarked over a 200-scar corpus on an Apple M4, a single `Recall` cost 7.0 ms, 9.95 MB, and 26,836 allocations, and `InjectGuardrails` cost 7.5 ms. The profile attributed roughly 69 percent of the time to file-open syscalls.
+  - Every call re-read and re-parsed each candidate scar file (`LoadScar`, 34 percent), re-hashed every anchor file for freshness (`ComputeFreshness`, 34 percent), re-decoded `index.json` (536 us), re-validated index freshness with a directory scan (379 us), and re-parsed the dependency manifests through `GetRepoDependencies`.
+  - Those costs are paid again on every request in a long-lived process. The MCP server holds one `Store` for its lifetime and recalls on every tool call, and the pre-commit hook runs the same path on every commit, so a store that never changes still paid full disk and parse cost per call.
+- **Decision**:
+  - `Store` gains a per-process `scarCache` holding parsed scar records, anchor digests, the decoded index, and the parsed dependency set. Every entry is keyed by a `fileStamp` of size plus modification time in nanoseconds, taken **before** the file is read, so a write that races a read leaves a mismatching stamp and the entry is refreshed rather than pinning stale bytes.
+  - The cache never hands out its own values. `LoadScar`, the catalog listing, and recall's candidate materialisation receive deep copies (`Scar.clone`), so a caller mutating a loaded scar cannot corrupt what the next recall sees.
+  - The store invalidates its own writes explicitly (`SaveScar`, `RebuildIndex` call `cache.drop`), which closes the window where a rewrite preserves both size and modification time. `RecordBaseline` deliberately keeps the direct hash path: recording a baseline is correctness-critical and rare, so it never reads a digest it did not just compute.
+  - Recall keeps the documented architecture: the index fast path is still validated against the scar directory on every call, but its decode is memoised on the index file's own stamp. Retrieval weights, thresholds, and the fail-closed invariant gate are untouched; only the cost of arriving at the same answer changed.
+  - Tokenisation stops building a stopword map per call (package-level `stopwordSet`), and task-term overlap short-circuits when the query carries no task.
+- **Consequences**:
+  - Measured on the same corpus, `Recall` falls from 7,014 us to 1,187 us (5.9x), from 9.95 MB to 0.84 MB (11.9x), and from 26,836 to 6,016 allocations (4.5x); `InjectGuardrails` falls to about 1.8 ms and the stale-index fallback to 0.75 ms. `ScoreScarItem` falls from 1,713 ns to 255 ns per scar.
+  - A one-shot CLI process starts with an empty cache and behaves exactly as before. The win accrues to the MCP server and the hook, which now pay one directory read, one stat per scar file, and a clone of each returned candidate instead of a full read-parse-hash cycle.
+  - Freshness now relies on size plus modification time for the *cached* digest. An external edit that preserves both would be missed until the file is touched again; an edit from `git-scars` itself always invalidates. This matches the trust model of other index-based tools and is recorded here because it is a real, if narrow, weakening of the previous always-rehash behaviour for long-lived processes.
+  - The parsed corpus stays resident for the life of the store. For a catalogue of the size this tool targets (tens to low hundreds of scars) that is well under a megabyte; a very large catalogue would trade memory for the same latency win.
+  - `LoadIndex` returns a shared value and is documented read-only, and the dependency map returned by `repoDependencies` is treated as read-only by every internal caller.
+- **Alternatives considered**:
+  - Ripping the index fast path out of `Recall` in favour of a plain cached directory scan: measured faster at 200 scars (about 0.35 ms) but it would make `index.json` vestigial for retrieval and silently demote a documented command, so the architecture was kept and its decode memoised instead.
+  - A TTL cache: rejected because a time-based rule can serve stale guardrails for the length of the TTL, while a stamp check is both cheaper (one stat) and exact under the documented assumption.
+  - Hash buffers pooled with `sync.Pool`: rejected because the stamp cache removes almost all hashing from the warm path anyway, and the added machinery had no profile to justify it.

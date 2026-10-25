@@ -866,6 +866,11 @@ func runHook(store *scar.Store, args []string) error {
 		installed := scar.IsHookInstalled(store.RepoRoot)
 		if installed {
 			fmt.Println("Git pre-commit hook is INSTALLED (.git/hooks/pre-commit).")
+			if _, err := exec.LookPath("git-scars"); err != nil {
+				// The generated hook skips every check when the binary is
+				// unreachable, so say so instead of reporting a healthy hook.
+				fmt.Println("WARNING: 'git-scars' is not on PATH; the hook will skip its checks silently. Add its directory to PATH or reinstall the hook from an environment where 'command -v git-scars' succeeds.")
+			}
 		} else {
 			fmt.Println("Git pre-commit hook is NOT installed. Run 'git-scars hook install' to activate.")
 		}

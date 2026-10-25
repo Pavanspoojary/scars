@@ -290,12 +290,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version: '1.22'
 
@@ -304,9 +304,9 @@ jobs:
 
       - name: Run git-scars check
         run: git-scars check --format sarif > git-scars.sarif
-        continue-on-error: true
 
       - name: Collect guardrail matches on changed files
+        if: always()
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -320,22 +320,24 @@ jobs:
             git-scars enforce --files "$(cat /tmp/changed.txt)" --fail-on high --format sarif > git-scars-enforce.sarif
             STATUS=$?
             set -e
-            if [ "$STATUS" -ne 0 ]; then
-              echo "::error::This change touches code covered by an active guardrail. Review the annotations on this pull request, then reaffirm or supersede the guardrail to record the review."
+            if [ "$STATUS" -eq 2 ]; then
+              echo "::warning::This change touches code covered by an active guardrail. Guardrail annotations are uploaded to this pull request. The build fails if a guardrailed symbol changed without a recorded review (git-scars reaffirm)."
+            elif [ "$STATUS" -ne 0 ]; then
+              echo "::error::git-scars enforce failed with exit code $STATUS"
               exit "$STATUS"
             fi
           fi
 
       - name: Upload SARIF report
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('git-scars.sarif') != ''
         with:
           sarif_file: git-scars.sarif
           category: git-scars-freshness
 
       - name: Upload guardrail annotations
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('git-scars-enforce.sarif') != ''
         with:
           sarif_file: git-scars-enforce.sarif
           category: git-scars-guardrails

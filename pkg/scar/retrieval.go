@@ -154,10 +154,12 @@ func ScoreScarItem(s *Scar, q QueryOptions) ScoredScar {
 	}
 
 	// 5. Task-term overlap (0 to 2)
-	termScore := computeOverlap(s.Title+" "+s.Lesson, q.Task)
-	if termScore > 0 {
-		score += termScore
-		res.Matches = append(res.Matches, fmt.Sprintf("task_terms(+%d)", termScore))
+	if strings.TrimSpace(q.Task) != "" {
+		termScore := computeOverlap(s.Title+" "+s.Lesson, q.Task)
+		if termScore > 0 {
+			score += termScore
+			res.Matches = append(res.Matches, fmt.Sprintf("task_terms(+%d)", termScore))
+		}
 	}
 
 	res.Score = score
@@ -243,6 +245,11 @@ func matchSymbolAnchor(querySyms, anchorSyms []string) (int, string) {
 }
 
 func computeOverlap(docText, queryText string) int {
+	// An absent query cannot overlap. The check runs before tokenizing so a
+	// recall without a task does not build word maps for every candidate.
+	if strings.TrimSpace(queryText) == "" {
+		return 0
+	}
 	docWords := tokenizeWords(docText)
 	queryWords := tokenizeWords(queryText)
 	if len(queryWords) == 0 || len(docWords) == 0 {
@@ -264,18 +271,22 @@ func computeOverlap(docText, queryText string) int {
 	return 0
 }
 
+// stopwordSet is the shared stopword filter for tokenizeWords. It is package
+// state rather than a per-call literal because tokenization runs once per
+// candidate on every recall.
+var stopwordSet = map[string]bool{
+	"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true,
+	"by": true, "for": true, "from": true, "has": true, "he": true, "in": true, "is": true,
+	"it": true, "its": true, "of": true, "on": true, "that": true, "the": true, "to": true,
+	"was": true, "were": true, "will": true, "with": true,
+}
+
 func tokenizeWords(s string) map[string]bool {
-	stopwords := map[string]bool{
-		"a": true, "an": true, "and": true, "are": true, "as": true, "at": true, "be": true,
-		"by": true, "for": true, "from": true, "has": true, "he": true, "in": true, "is": true,
-		"it": true, "its": true, "of": true, "on": true, "that": true, "the": true, "to": true,
-		"was": true, "were": true, "will": true, "with": true,
-	}
 	words := strings.Fields(strings.ToLower(s))
-	m := make(map[string]bool)
+	m := make(map[string]bool, len(words))
 	for _, w := range words {
 		w = strings.Trim(w, `.,!?:;'"()[]{}<>/-_`)
-		if len(w) > 2 && !stopwords[w] {
+		if len(w) > 2 && !stopwordSet[w] {
 			m[w] = true
 		}
 	}
@@ -329,7 +340,7 @@ func (s *Store) Recall(q QueryOptions) ([]ScoredScar, error) {
 	}
 
 	if q.InstalledDependencies == nil {
-		q.InstalledDependencies = GetRepoDependencies(s.RepoRoot)
+		q.InstalledDependencies = s.repoDependencies()
 	}
 
 	qualities, _ := s.GetAllScarQualities()

@@ -84,12 +84,29 @@ func (s *Store) RebuildIndex() (*IndexCache, error) {
 		return nil, fmt.Errorf("failed writing index file %s: %w", indexPath, err)
 	}
 
+	// The rewritten file invalidates any decode this process is holding.
+	s.cache.drop(indexPath)
+
 	return index, nil
 }
 
 // LoadIndex reads .gitscars/.local/index.json if present.
+//
+// The decoded index is reused while the file keeps its stamp; callers must
+// treat the returned value as read-only. Recall revalidates the index
+// against the scar directory on every call, so a stale index is never
+// served for retrieval even though its decode is memoised here.
 func (s *Store) LoadIndex() (*IndexCache, error) {
 	indexPath := filepath.Join(s.LocalDir, IndexFileName)
+
+	// Stamp before reading: a write between the stamp and the read then
+	// produces a mismatching stamp on the next lookup instead of pinning
+	// stale bytes under the new stamp.
+	stamp := stampFile(indexPath)
+	if idx, ok := s.cache.getIndex(indexPath, stamp); ok {
+		return idx, nil
+	}
+
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
 		return nil, err
@@ -100,6 +117,7 @@ func (s *Store) LoadIndex() (*IndexCache, error) {
 		return nil, fmt.Errorf("malformed index file %s: %w", indexPath, err)
 	}
 
+	s.cache.putIndex(indexPath, stamp, &index)
 	return &index, nil
 }
 

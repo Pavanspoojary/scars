@@ -19,6 +19,11 @@ type Store struct {
 	RepoRoot string
 	ScarsDir string
 	LocalDir string
+
+	// cache holds parsed records and anchor digests for the lifetime of this
+	// store. It is per-process state: a store built by a one-shot command
+	// starts empty, and a long-lived MCP server reuses it across requests.
+	cache *scarCache
 }
 
 // NewStore initializes a Store rooted at the repository directory.
@@ -27,6 +32,7 @@ func NewStore(repoRoot string) *Store {
 		RepoRoot: repoRoot,
 		ScarsDir: filepath.Join(repoRoot, DefaultStoreDir, ScarsDirName),
 		LocalDir: filepath.Join(repoRoot, DefaultStoreDir, LocalDirName),
+		cache:    newScarCache(),
 	}
 }
 
@@ -98,23 +104,25 @@ func (s *Store) LoadScar(idOrFile string) (*Scar, string, error) {
 		targetPath = filepath.Join(s.ScarsDir, idOrFile+".md")
 	}
 
-	data, err := os.ReadFile(targetPath)
+	scar, err := s.loadScarFile(targetPath)
 	if err != nil {
+		var loadErr *scarLoadError
+		if errors.As(err, &loadErr) && loadErr.parsed {
+			return nil, targetPath, fmt.Errorf("failed parsing scar %s: %w", targetPath, loadErr.err)
+		}
 		// Try scanning directory for partial ID match
 		matchedPath, findErr := s.findByID(idOrFile)
 		if findErr != nil {
 			return nil, "", fmt.Errorf("scar %q not found: %w", idOrFile, err)
 		}
 		targetPath = matchedPath
-		data, err = os.ReadFile(targetPath)
+		scar, err = s.loadScarFile(targetPath)
 		if err != nil {
+			if errors.As(err, &loadErr) && loadErr.parsed {
+				return nil, targetPath, fmt.Errorf("failed parsing scar %s: %w", targetPath, loadErr.err)
+			}
 			return nil, "", fmt.Errorf("failed reading scar at %s: %w", targetPath, err)
 		}
-	}
-
-	scar, err := ParseFrontmatter(data)
-	if err != nil {
-		return nil, targetPath, fmt.Errorf("failed parsing scar %s: %w", targetPath, err)
 	}
 
 	return scar, targetPath, nil
@@ -153,6 +161,11 @@ func (s *Store) SaveScar(scar *Scar) (string, error) {
 	if err := os.WriteFile(targetPath, data, 0644); err != nil {
 		return "", fmt.Errorf("failed writing scar to %s: %w", targetPath, err)
 	}
+
+	// Our own write invalidates what this process cached for the path, so a
+	// rewrite that preserves size and modification time cannot serve the
+	// previous content.
+	s.cache.drop(targetPath)
 
 	return targetPath, nil
 }
@@ -226,18 +239,7 @@ func (s *Store) ListScarsDetailed() ([]ScarSummary, []ParseFailure, error) {
 		go func() {
 			defer wg.Done()
 			for path := range jobs {
-				data, err := os.ReadFile(path)
-				if err != nil {
-					mu.Lock()
-					failures = append(failures, ParseFailure{
-						FilePath: path,
-						ID:       strings.TrimSuffix(filepath.Base(path), ".md"),
-						Error:    err.Error(),
-					})
-					mu.Unlock()
-					continue
-				}
-				scar, err := ParseFrontmatter(data)
+				scar, err := s.loadScarFile(path)
 				if err != nil {
 					mu.Lock()
 					failures = append(failures, ParseFailure{
@@ -284,7 +286,7 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 	if len(scar.Baseline.AnchorHashes) == 1 {
 		for relPath, expectedHash := range scar.Baseline.AnchorHashes {
 			fullPath := filepath.Join(s.RepoRoot, relPath)
-			currentHash, err := hashFile(fullPath)
+			currentHash, err := s.cachedHashFile(fullPath)
 			if err != nil {
 				return FreshnessUnavailable
 			}
@@ -323,7 +325,7 @@ func (s *Store) ComputeFreshness(scar *Scar) string {
 		go func(rp, exp string) {
 			defer wg.Done()
 			fullPath := filepath.Join(s.RepoRoot, rp)
-			curr, err := hashFile(fullPath)
+			curr, err := s.cachedHashFile(fullPath)
 			if err != nil {
 				results <- checkResult{relPath: rp, unavailable: true}
 				return

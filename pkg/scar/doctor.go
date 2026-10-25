@@ -163,6 +163,13 @@ func (s *Store) RunDoctor() *DoctorReport {
 	// 4. Git Pre-Commit Hook Check
 	if !IsHookInstalled(s.RepoRoot) {
 		addCheck("Pre-Commit Hook", "WARN", "Git pre-commit hook is not installed. Run 'git-scars hook install'")
+	} else if _, err := exec.LookPath("git-scars"); err != nil {
+		// The generated hook guards every check behind `command -v git-scars`,
+		// so a hook that cannot resolve the binary skips silently instead of
+		// failing: every commit would pass without the guardrail running.
+		addCheck("Pre-Commit Hook", "WARN",
+			"Hook installed, but 'git-scars' is not on PATH; the hook will skip its checks silently",
+			"Put the directory containing git-scars on PATH, or reinstall the hook from an environment where 'command -v git-scars' succeeds")
 	} else {
 		addCheck("Pre-Commit Hook", "OK", "Active (.git/hooks/pre-commit)")
 	}

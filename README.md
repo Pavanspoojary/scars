@@ -188,6 +188,8 @@ go test ./... 2>&1 | git-scars recall --stdin
 git-scars recall --files pkg/auth/context.go --json
 ```
 
+Recall reads through a per-process cache: parsed records, anchor digests, the decoded index, and the parsed dependency manifests are reused while their files keep the same size and modification time, and every cached value is invalidated when this process writes the file. A one-shot command starts with an empty cache and always reflects the disk; a long-lived MCP server pays the full read once and then recalls on a directory read, one stat per scar file, and a copy of each returned candidate. Retrieval weights, thresholds, and the fail-closed invariant gate are unaffected — only the cost of reaching the same answer changed (see [ADR-0021](DECISIONS.md)).
+
 ### 6. Token-Budgeted Agent Prompt Injection
 Generate an ultra-dense, token-budget-capped guardrail block for AI coding agents before file editing:
 ```bash
@@ -247,12 +249,14 @@ Install the Git pre-commit hook to catch stale active scars before staging and c
 # Install hook into .git/hooks/pre-commit
 git-scars hook install
 
-# Inspect hook status
+# Inspect hook status (warns when git-scars is not on PATH)
 git-scars hook status
 
 # Uninstall hook
 git-scars hook uninstall
 ```
+
+The generated hook guards every check behind `command -v git-scars`, so a hook whose binary cannot be resolved skips silently instead of failing — every commit would pass with no guardrail running. `git-scars hook status` and the `Pre-Commit Hook` probe in `git-scars doctor` both report a warning in that state.
 
 ### 11. Inspect Drift & Reaffirm
 When `git-scars check` or pre-commit hooks report modified anchors, inspect the exact unified diff before reaffirming:
@@ -277,7 +281,7 @@ git-scars stats --json
 ```
 
 ### 13. Run Full Diagnostics & Automated Repair
-Audit Git worktree health, scar file loadability, schema validity, invariants, anchor drift, and hook readiness:
+Audit Git worktree health, scar file loadability, schema validity, invariants, anchor drift, and hook readiness (including whether an installed hook can resolve `git-scars` on PATH):
 ```bash
 # Interactive diagnostic checklist
 git-scars doctor
@@ -704,6 +708,12 @@ anchors:
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md) for repository standards, code quality gates, and branching rules.
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). The accessibility commitment, supported environments, known limitations, and the process for reporting a barrier are described in [ACCESSIBILITY.md](ACCESSIBILITY.md). Where to ask a question or report a problem is described in [SUPPORT.md](SUPPORT.md).
+
+Retrieval performance is guarded by benchmarks over a synthetic 200-scar corpus. Run them before and after touching `Recall`, `LoadScar`, freshness, or the process cache, and report the before/after numbers with the change:
+
+```bash
+go test -run '^$' -bench 'BenchmarkRecall|BenchmarkInjectGuardrails|BenchmarkScoreScarItem' -benchmem ./pkg/scar/
+```
 
 ---
 

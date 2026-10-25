@@ -257,3 +257,81 @@ func TestHarvestConfidenceCountsBodyReferencesAndCappedScope(t *testing.T) {
 func containsLiteral(haystack, needle string) bool {
 	return strings.Contains(haystack, needle)
 }
+
+// TestHarvestRootCommitIsMined pins the --root handling in both git call
+// sites. The first commit of a repository has no parent, and a plain
+// `git diff-tree` prints nothing for a parentless commit: every fix that
+// lives in the root commit would become invisible if the flag were dropped,
+// silently shrinking the harvest to the second commit onward.
+func TestHarvestRootCommitIsMined(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+	for _, args := range [][]string{
+		{"config", "user.email", "ci@example.com"},
+		{"config", "user.name", "CI Builder"},
+	} {
+		cmd = exec.Command("git", args...)
+		cmd.Dir = tmpDir
+		_ = cmd.Run()
+	}
+
+	store := NewStore(tmpDir)
+	if err := store.Init(); err != nil {
+		t.Fatalf("store init failed: %v", err)
+	}
+
+	// The repository's only commit is itself a qualified fix: production
+	// change plus a co-located test, with an issue reference in the subject.
+	pkgDir := filepath.Join(tmpDir, "pkg")
+	if err := os.MkdirAll(pkgDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "auth.go"),
+		[]byte("package auth\nfunc Login(token string) bool { return token != \"\" }\n"), 0644); err != nil {
+		t.Fatalf("write production file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(pkgDir, "auth_test.go"),
+		[]byte("package auth\nimport \"testing\"\nfunc TestLogin(t *testing.T){}\n"), 0644); err != nil {
+		t.Fatalf("write test file: %v", err)
+	}
+	cmd = exec.Command("git", "add", ".")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git add: %v", err)
+	}
+	cmd = exec.Command("git", "commit", "-m", "fix: nil pointer panic on empty token authentication (#102)")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git commit: %v", err)
+	}
+
+	result, err := store.HarvestCommits(HarvestOptions{
+		DryRun:        true,
+		MaxCommits:    10,
+		MaxFiles:      5,
+		MinConfidence: 7,
+		AllowUntested: false,
+	})
+	if err != nil {
+		t.Fatalf("harvest failed: %v", err)
+	}
+
+	if result.FoundFixes != 1 {
+		t.Fatalf("expected the root commit to be mined as a fix, got %d (scanned %d)", result.FoundFixes, result.ScannedCommits)
+	}
+	cand := result.Candidates[0]
+	if len(cand.Files) == 0 || cand.Files[0] != "pkg/auth.go" {
+		t.Errorf("expected the root commit's production file, got %v", cand.Files)
+	}
+	if len(cand.TestFiles) == 0 || cand.TestFiles[0] != "pkg/auth_test.go" {
+		t.Errorf("expected the root commit's co-located test, got %v", cand.TestFiles)
+	}
+	if cand.Confidence < 7 {
+		t.Errorf("expected confidence >= 7, got %d with reasons %q", cand.Confidence, cand.Reason)
+	}
+}

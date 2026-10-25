@@ -91,10 +91,21 @@ func TestFormatCheckSARIF(t *testing.T) {
 
 func TestGitHubWorkflowYAML(t *testing.T) {
 	yaml := GitHubWorkflowYAML()
-	if !strings.Contains(yaml, "upload-sarif") {
-		t.Errorf("expected upload-sarif in workflow")
+	if !strings.Contains(yaml, "upload-sarif@v4") {
+		t.Errorf("expected upload-sarif@v4 in workflow")
 	}
 	if !strings.Contains(yaml, "git-scars check --format sarif") {
 		t.Errorf("expected git-scars check --format sarif in workflow")
+	}
+	// The freshness check is the failing gate; guardrail matches annotate but do
+	// not fail the build, and SARIF uploads are guarded on the file existing.
+	if !strings.Contains(yaml, "hashFiles(") {
+		t.Errorf("expected hashFiles guard on SARIF uploads in workflow")
+	}
+	if !strings.Contains(yaml, "::warning::") {
+		t.Errorf("expected guardrail matches to surface as warnings, not build failures")
+	}
+	if strings.Contains(yaml, "continue-on-error") {
+		t.Errorf("expected the freshness check to gate the build without continue-on-error")
 	}
 }

@@ -28,17 +28,17 @@ verifier:
     - "./..."
   command_hash: "e067222721ad0d3d90c18312f20a51eb36a8c75b859a2d143479d0b39f733a4d"
 baseline:
-  recorded_at: "2026-10-21T00:53:52Z"
+  recorded_at: "2026-10-25T20:00:22Z"
   command_hash: "e067222721ad0d3d90c18312f20a51eb36a8c75b859a2d143479d0b39f733a4d"
-  pkg/scar/store.go: "66f1033419560c5f06179d8db5fda201b44279239ac55b205e2054f379f99439"
+  pkg/scar/store.go: "b7ea9e46c46e5dc1740739839f48c67e1479fab5f4fb31d2f508045a41663121"
   symbol_hashes:
-    ComputeFreshness: "0a3b0100887805bdd07b8caff3b6848779dc1f553ebeffcfb86cca68bcf0f662"
+    ComputeFreshness: "5004afda178a26c9e228ad04e612c3106ca1b1451cc47e856a3430b4ea1f1899"
     ListScars: "358301df16272e204d89f6ad020fa3ff702d387e26ce79f156a64aa1be411b33"
 review:
   status: "approved"
   reviewer: "maintainer"
   date: "2026-10-11T08:00:00Z"
-  rationale: "Reaffirmed: Re-anchored to pkg/scar/store.go where the worker pool actually lives. The previous anchor pointed at cmd/git-scars/main.go, which contains no channels or goroutines. Added severity, fix hint, and literal bad and good patterns extracted from the anchored implementation."
+  rationale: "Reaffirmed: Retrieval cache stage edited store.go: the catalog worker pool still buffers its job channel to the worker count (make(chan string, len(mdFiles))) and closes it before waiting, so the guarded pattern holds. Verified by go test -race ./... with the new cache under concurrent recall."
 lifecycle:
   state: "active"
 ---

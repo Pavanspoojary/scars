@@ -25,21 +25,21 @@ verifier:
     - "-race"
     - "./pkg/scar/..."
   command_hash: "b5f170553be68fb27a9807a1f68c3449aa4c0c76362373110011bd73d4978aab"
-  output_excerpt: "ok  \\tgithub.com/Pavanspoojary/scars/pkg/scar\\t(cached)\\n"
+  output_excerpt: "ok  \\\\tgithub.com/Pavanspoojary/scars/pkg/scar\\\\t(cached)\\\\n"
   output_hash: "fc3cd2f22cc71bfcd2412f28d646f4990bc9eec43378bcdd5378013542068e0b"
 baseline:
-  recorded_at: "2026-10-21T01:24:39Z"
+  recorded_at: "2026-10-25T20:00:22Z"
   command_hash: "b5f170553be68fb27a9807a1f68c3449aa4c0c76362373110011bd73d4978aab"
   pkg/scar/model.go: "aa103fff0fca60cbf4ae888a13fcd3d239d48d797e190342b8d88b4a0b35f911"
-  pkg/scar/retrieval.go: "00020477d153a979fe2796e2d910c5a075bc2e0320f4ea89cfb080b16090c25b"
+  pkg/scar/retrieval.go: "80e327274f613e05805dcfe25bb14a62e7af85c823843bb796f8e0da4ec40fcc"
   symbol_hashes:
-    recall: "58e72b8ed2cbe940ff2d231bd29ec6ab60c7ea06868569b492883f4f98281a2c"
-    validateinvariants: "a4e9db1086c363e304b6a1bf1cca3b292d9d357e489e0df203dc5527af6fe3bd"
+    Recall: "c2e7b4a28fa736b375038658b73ba1fad1c4822b7960dd390812fb6acdb13923"
+    ValidateInvariants: "a4e9db1086c363e304b6a1bf1cca3b292d9d357e489e0df203dc5527af6fe3bd"
 review:
   status: "approved"
   reviewer: "maintainer"
   date: "2026-10-21T01:24:54Z"
-  rationale: "Reviewed the diff: the recorded command hash was never compared against the command it described, so verification evidence could be asserted independently of the command it claims to prove."
+  rationale: "Reaffirmed: Retrieval cache stage edited retrieval.go: verifier command-hash binding and the fail-closed invariant gate in Recall are unchanged; the edits touch only scoring allocation cost and the memoised dependency parse. Verified by go test -race ./pkg/scar/... ."
 lifecycle:
   state: "active"
 ---

@@ -420,3 +420,29 @@ This document tracks significant design choices, trade-offs, evaluated alternati
   - Ripping the index fast path out of `Recall` in favour of a plain cached directory scan: measured faster at 200 scars (about 0.35 ms) but it would make `index.json` vestigial for retrieval and silently demote a documented command, so the architecture was kept and its decode memoised instead.
   - A TTL cache: rejected because a time-based rule can serve stale guardrails for the length of the TTL, while a stamp check is both cheaper (one stat) and exact under the documented assumption.
   - Hash buffers pooled with `sync.Pool`: rejected because the stamp cache removes almost all hashing from the warm path anyway, and the added machinery had no profile to justify it.
+
+## ADR-0022: The Freshness Check Gates Continuous Integration; Enforcement Annotates
+
+- **Date**: 2026-10-26
+- **Status**: Accepted
+- **Context**:
+  - The `git-scars-freshness` code scanning configuration reported "Workflow runs failing" after the v3.0.0, v3.1.0, and v3.2.0 merges. The `Collect guardrail matches on changed files` step ran `enforce --fail-on high`, which blocks on severity and file overlap alone (`IncludeStale: true`), so any change touching a file anchored by a high-severity scar exited 2 even after the scar had been reaffirmed. The step's own guidance ("reaffirm or supersede the guardrail to record the review") could never turn the build green, so the gate was unpassable by its stated resolution.
+  - The failing step skipped `Collect freshness findings`, which carried no `if: always()`, so `Upload freshness annotations` then failed on the missing `git-scars-check.sarif`. That upload failure, not the guardrail finding, is what code scanning reported as the error.
+  - The verdict that can distinguish a reviewed change from an unreviewed one already existed and already ran: `check` exits 2 when an anchored symbol changed since the recorded baseline, symbol-level freshness keeps unrelated edits inside the same file current, and the `Validate GitScars integrity and freshness` step passed on the same run in which the enforce step failed.
+  - ADR-0018 records the intent of the continuous integration step as collecting changed files, evaluating them, and uploading the result as annotations under a dedicated code scanning category, and README section 9 documents `check` as the CI freshness gate with stable exit codes. The later hard-fail on `enforce` drifted from both.
+  - The generated workflow from `git-scars init --ci github` carried the same wiring with an additional inversion: `enforce` failed the build while `check` ran with `continue-on-error`, so a stale anchor never failed a scaffolded build.
+- **Decision**:
+  - In continuous integration, `enforce` collects SARIF annotations and reports a match (exit 2) as a `::warning::` annotation; only an operational failure (any exit other than 0 or 2) fails the collecting step. `check` remains the failing gate: a guardrailed symbol changed without a recorded review fails the build with exit 2 and the stale-scar list.
+  - Both collection steps run under `if: always()` so the annotation chain survives an earlier failure, and both `upload-sarif` steps are guarded with `hashFiles(...) != ''` so an upload never fails on a missing or empty file.
+  - The generated workflow is wired identically: `check` gates the build, `enforce` annotates, and the uploads are guarded.
+  - Action pins move to `github/codeql-action/upload-sarif@v4` (v3 is deprecated for December 2026), `actions/checkout@v7`, and `actions/setup-go@v7` (the Node 20 runtime deprecation warnings).
+  - The `Enforce` command itself is unchanged: its pre-edit semantics (block on a match regardless of freshness) are pinned by tests and README section 3 and serve the local hook and the MCP pre-edit surface, where a fresh scar must still block before an edit is made.
+- **Consequences**:
+  - A change that touches guardrailed files goes green exactly when the scar's baseline covers the current content, so reaffirming in the branch makes continuous integration pass as the message always promised. A change that alters a guardrailed symbol without reaffirmation fails at `Validate GitScars integrity and freshness` with the stale-scar list.
+  - Edits inside an anchored file that preserve every anchored symbol no longer fail the build; symbol-level freshness already declared those edits outside the guarded behaviour, and the file-overlap rule no longer contradicts that verdict.
+  - SARIF uploads complete on every run that produces them, so the `git-scars-guardrails` and `git-scars-freshness` code scanning configurations stop reporting failing workflow runs, and guardrail annotations still appear on the pull requests that need them most.
+  - The scaffolded workflow no longer needs a follow-up patch by each consumer to become passable.
+- **Alternatives considered**:
+  - A freshness-aware mode of the `enforce` command (a flag failing only on stale matches): rejected as indirection, because `check` already computes exactly that verdict and is already the documented CI gate. A second command reaching the same answer would duplicate the freshness path and widen the public CLI surface.
+  - Keeping the enforce step as a hard gate and repairing only the upload chain: rejected because the build would stay permanently red for every change to a file anchored by a high-severity scar, which is the reported failure itself rather than a fix for it.
+  - Making `Enforce` itself freshness-aware: rejected because pre-edit enforcement must block on a match before any edit exists, and `TestEnforceBlocked` plus README section 3 pin that behaviour.
